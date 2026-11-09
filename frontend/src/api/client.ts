@@ -1,5 +1,6 @@
 import {
-  TestCase, Run, Finding, Review, Capsule, RegressionRun, SuiteSummary, Health
+  TestCase, Run, Finding, Review, Capsule, RegressionRun, SuiteSummary, Health,
+  ModelOption, ArenaComparisonResponse, BenchmarkMatrixResponse
 } from '../types';
 
 const API_BASE = '/api';
@@ -154,5 +155,40 @@ export async function addReview(runId: string, reviewData: any): Promise<Review>
     body: JSON.stringify(reviewData)
   });
   if (!res.ok) throw new Error('Failed to add review');
+  return res.json();
+}
+
+export async function fetchArenaModels(): Promise<{ tts_models: ModelOption[]; asr_models: ModelOption[] }> {
+  const res = await fetch(`${API_BASE}/arena/models`);
+  if (!res.ok) throw new Error('Failed to fetch arena models');
+  return res.json();
+}
+
+export async function runArenaComparison(payload: {
+  case_id?: string;
+  reference_text?: string;
+  language?: string;
+  tts_model: string;
+  voice?: string;
+  model_a: string;
+  model_b: string;
+  channel: string;
+  injected_fault?: string;
+}): Promise<ArenaComparisonResponse> {
+  const res = await fetch(`${API_BASE}/arena/compare`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error?.message || err.detail || 'Arena comparison failed');
+  }
+  return res.json();
+}
+
+export async function fetchBenchmarkMatrix(): Promise<BenchmarkMatrixResponse> {
+  const res = await fetch(`${API_BASE}/benchmarks/matrix`);
+  if (!res.ok) throw new Error('Failed to fetch benchmark matrix');
   return res.json();
 }
