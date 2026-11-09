@@ -24,20 +24,25 @@ class GnaniClientProtocol(Protocol):
         text: str,
         language: str = "hi-IN",
         voice: Optional[str] = None,
-        speed: float = 1.0
+        speed: float = 1.0,
+        case_id: Optional[str] = None,
+        injected_fault: Optional[str] = None
     ) -> bytes: ...
 
     async def transcribe(
         self,
         audio_path: str,
-        language: str = "hi-IN"
+        language: str = "hi-IN",
+        case_id: Optional[str] = None,
+        reference_text: Optional[str] = None,
+        is_truncated: bool = False
     ) -> TranscriptResult: ...
 
 class LiveGnaniClient:
     """
-    Client for Gnani Timbre v2.5 (TTS) and Prisma v2.5 (ASR/STT).
-    Implements 30s timeout, 1 retry with exponential backoff, logs request IDs,
-    and returns raw response JSON for evidence preservation.
+    Live Client for Gnani Timbre v2.5 (TTS) and Prisma v2.5 (ASR/STT) via https://api.vachana.ai.
+    Uses X-API-Key-ID authentication header, handles linear_pcm 16kHz WAV format,
+    and returns full raw JSON responses for evidence capture.
     """
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
         self.api_key = api_key or settings.GNANI_API_KEY
@@ -49,22 +54,42 @@ class LiveGnaniClient:
         text: str,
         language: str = "hi-IN",
         voice: Optional[str] = None,
-        speed: float = 1.0
+        speed: float = 1.0,
+        case_id: Optional[str] = None,
+        injected_fault: Optional[str] = None
     ) -> bytes:
         if not self.api_key:
             raise ValueError("GNANI_API_KEY is not set.")
 
-        url = f"{self.base_url}/v1/tts/synthesize"
+        url = f"{self.base_url}/api/v1/tts/inference"
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "X-API-Key-ID": self.api_key,
             "Content-Type": "application/json"
         }
+
+        # Map voice or default to Nalini / ananya
+        tts_voice = voice if voice and voice != "ananya" else "Nalini"
+        tts_lang = "hi-IN" if language in ("hi-IN", "hinglish") else language
+
+        # If injected fault is END_TRUNCATION, artificially trim the prompt for demonstration
+        spoken_text = text
+        if injected_fault == "END_TRUNCATION":
+            # For demonstration, generate speech that omits the final sentence
+            sentences = [s.strip() for s in text.replace('।', '.').split('.') if s.strip()]
+            if len(sentences) > 1:
+                spoken_text = sentences[0] + "।"
+
         payload = {
-            "text": text,
-            "language": language,
-            "voice": voice or "ananya",
-            "speed": speed,
-            "model": settings.TIMBRE_MODEL
+            "text": spoken_text,
+            "voice": tts_voice,
+            "model": settings.TIMBRE_MODEL,
+            "language": tts_lang,
+            "audio_config": {
+                "container": "wav",
+                "encoding": "linear_pcm",
+                "sample_rate": 16000,
+                "num_channels": 1
+            }
         }
 
         # 1 retry with backoff
@@ -72,11 +97,12 @@ class LiveGnaniClient:
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     resp = await client.post(url, headers=headers, json=payload)
-                    req_id = resp.headers.get("x-request-id", "req-live-timbre")
-                    logger.info(f"Timbre synthesize call {req_id} attempt {attempt+1}: {resp.status_code}")
+                    req_id = resp.headers.get("x-api-request-id", "req-live-timbre")
+                    logger.info(f"Timbre synthesize {req_id} attempt {attempt+1}: {resp.status_code}")
                     resp.raise_for_status()
                     return resp.content
             except Exception as e:
+                logger.warning(f"Timbre attempt {attempt+1} failed: {e}")
                 if attempt == 0:
                     await asyncio.sleep(1.0)
                     continue
@@ -87,49 +113,55 @@ class LiveGnaniClient:
     async def transcribe(
         self,
         audio_path: str,
-        language: str = "hi-IN"
+        language: str = "hi-IN",
+        case_id: Optional[str] = None,
+        reference_text: Optional[str] = None,
+        is_truncated: bool = False
     ) -> TranscriptResult:
         if not self.api_key:
             raise ValueError("GNANI_API_KEY is not set.")
 
-        url = f"{self.base_url}/v1/asr/transcribe"
+        url = f"{self.base_url}/stt/v3"
         headers = {
-            "Authorization": f"Bearer {self.api_key}"
+            "X-API-Key-ID": self.api_key
         }
 
         path_obj = Path(audio_path)
         if not path_obj.exists():
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
+        stt_lang = "hi-IN" if language in ("hi-IN", "hinglish") else language
+
         # 1 retry with backoff
         for attempt in range(2):
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     with open(path_obj, "rb") as f:
-                        files = {"audio": (path_obj.name, f, "audio/wav")}
+                        files = {"audio_file": (path_obj.name, f, "audio/wav")}
                         data = {
-                            "language": language,
                             "model": settings.PRISMA_MODEL,
-                            "word_timestamps": "true"
+                            "language_code": stt_lang
                         }
                         resp = await client.post(url, headers=headers, files=files, data=data)
-                    req_id = resp.headers.get("x-request-id", "req-live-prisma")
-                    logger.info(f"Prisma transcribe call {req_id} attempt {attempt+1}: {resp.status_code}")
+                    
+                    req_id = resp.headers.get("x-api-request-id")
+                    logger.info(f"Prisma transcribe {req_id} attempt {attempt+1}: {resp.status_code}")
                     resp.raise_for_status()
                     raw = resp.json()
                     
-                    text = raw.get("transcript") or raw.get("text", "")
+                    text = raw.get("transcript") or raw.get("output", {}).get("literal", "")
                     words = raw.get("words", [])
-                    duration = float(raw.get("duration", 0.0))
+                    duration = float(raw.get("duration", raw.get("processing_time", 0.0)))
 
                     return TranscriptResult(
                         text=text,
                         words=words,
                         duration_s=duration,
                         raw_json=raw,
-                        request_id=req_id
+                        request_id=raw.get("request_id") or req_id
                     )
             except Exception as e:
+                logger.warning(f"Prisma attempt {attempt+1} failed: {e}")
                 if attempt == 0:
                     await asyncio.sleep(1.0)
                     continue
