@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  svaralens:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - GNANI_API_KEY=${GNANI_API_KEY:-}
+      - GNANI_API_BASE=${GNANI_API_BASE:-https://api.gnani.ai}
+      - TIMBRE_MODEL=timbre-v2.5
+      - PRISMA_MODEL=prisma-v2.5
+      - MOCK_MODE=${MOCK_MODE:-false}
+    volumes:
+      - svaralens_data:/app/data
+      - svaralens_audio:/app/storage/audio
+    restart: unless-stopped
+
+volumes:
+  svaralens_data:
+  svaralens_audio:

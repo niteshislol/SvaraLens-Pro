@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #0F1115;
+    color: #E6E8EE;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  /* Prevent matras from being clipped in Hindi */
+  .font-devanagari, [lang="hi"], [lang="hi-IN"], [lang="hinglish"] {
+    font-family: 'Noto Sans Devanagari', 'Inter', sans-serif;
+    line-height: 1.65;
+  }
+}
+
+/* Custom scrollbars for dense devtool look */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0F1115;
+}
+::-webkit-scrollbar-thumb {
+  background: #262B36;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #4F8CFF55;
+}
