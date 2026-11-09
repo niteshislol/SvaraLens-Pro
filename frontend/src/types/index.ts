@@ -170,6 +170,7 @@ export interface Capsule {
   severity: Severity;
   review_status: string;
   failing_audio_sha256: string;
+  audio_sha256?: string;
   spec: CapsuleSpec;
   state: 'OPEN' | 'RESOLVED' | 'REOPENED';
   created_at: string;
@@ -216,4 +217,8 @@ export interface Health {
   timbre_model: string;
   prisma_model: string;
   database_connected: boolean;
+  gnani_connected?: boolean;
+  execution_mode?: string;
+  scenarios_count?: number;
+  capsules_count?: number;
 }

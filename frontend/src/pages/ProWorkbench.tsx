@@ -1,22 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { TestCase, Run, Finding, Capsule, RegressionRun, DefectPin } from '../types';
+import { TestCase, Run, Capsule, RegressionRun } from '../types';
 import {
-  fetchTestCases, fetchRun, triggerGenerateRun, uploadAudioRun,
+  fetchTestCases, fetchRun, triggerGenerateRun,
   createTestCase, importCasesCsv, addDefectPin, removeDefectPin,
   updateFinding, compileCapsule, rerunRegression, approveRegression,
   getAudioUrl, duplicateTestCase, validateCapsuleIntegrity
 } from '../api/client';
 import { ProWaveformPlayer } from '../components/ProWaveformPlayer';
-import { ModelArenaSelector, V3_PERSONAS, V25_PERSONAS } from '../components/ModelArenaSelector';
 import { DualAsrJury } from '../components/DualAsrJury';
-import { DefectPinDrawer } from '../components/DefectPinDrawer';
-import { TranscriptDiff } from '../components/TranscriptDiff';
-import { BeforeAfterTable } from '../components/BeforeAfterTable';
+import { CompactAudioHealth } from '../components/CompactAudioHealth';
+import { AudioDetailsDrawer } from '../components/AudioDetailsDrawer';
 import {
-  Play, Plus, Upload, Sparkles, Pin, ShieldCheck, CheckCircle2,
-  AlertTriangle, Activity, Volume2, ArrowRight, Loader2, Gauge,
-  FileText, Check, Clock, RefreshCw, Layers, Search, X, Wand2,
-  Copy, Download
+  Plus, Search, FileText, CheckCircle2, ChevronDown,
+  Layers, Pin, ArrowRight, Loader2, RefreshCw, Copy,
+  Check, Download, AlertTriangle, ShieldCheck, Sparkles,
+  Cpu, Filter
 } from 'lucide-react';
 
 interface ProWorkbenchProps {
@@ -25,7 +23,7 @@ interface ProWorkbenchProps {
 }
 
 export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
-  initialCaseId = 'TC-014',
+  initialCaseId = 'TC-007',
   onOpenReport
 }) => {
   // Navigation & Case State
@@ -37,36 +35,45 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
 
   // Model & Synthesis Arena State
   const [selectedModel, setSelectedModel] = useState<'timbre-v3.0' | 'timbre-v2.5'>('timbre-v3.0');
-  const [selectedVoice, setSelectedVoice] = useState<string>('Shivani');
-  const [injectFault, setInjectFault] = useState<string>('END_TRUNCATION');
+  const [selectedVoice, setSelectedVoice] = useState<string>('Shivani - Warm & Conversational');
   const [generating, setGenerating] = useState(false);
 
-  // Active Run & Telemetry State
+  // Active Run & Audio Telemetry State
   const [activeRun, setActiveRun] = useState<Run | null>(null);
   const [highlightRegion, setHighlightRegion] = useState<[number, number] | undefined>();
 
-  // Defect Capsule & Regression State
+  // Right Inspector State
+  const [rightTab, setRightTab] = useState<'radar' | 'pins' | 'capsule'>('radar');
   const [activeCapsule, setActiveCapsule] = useState<Capsule | null>(null);
   const [regressionRun, setRegressionRun] = useState<RegressionRun | null>(null);
   const [fixedRun, setFixedRun] = useState<Run | null>(null);
   const [compilingCapsule, setCompilingCapsule] = useState(false);
   const [rerunningRegression, setRerunningRegression] = useState(false);
-  const [rightTab, setRightTab] = useState<'radar' | 'pins' | 'capsule'>('radar');
+  const [integrityStatus, setIntegrityStatus] = useState<string | null>(null);
+  const [verifyingHash, setVerifyingHash] = useState(false);
 
-  // Modals & New Case Form State
+  // Modals & Drawers
+  const [isDetailsDrawerOpen, setIsDetailsDrawerOpen] = useState(false);
   const [showNewCaseModal, setShowNewCaseModal] = useState(false);
-  const [csvUploading, setCsvUploading] = useState(false);
+  const [showAddPinModal, setShowAddPinModal] = useState(false);
+  const [pinTime, setPinTime] = useState<number>(3.2);
+
+  // New Case Form State
   const [newScenario, setNewScenario] = useState('');
   const [newLanguage, setNewLanguage] = useState<'hi-IN' | 'hinglish'>('hi-IN');
   const [newTtsModel, setNewTtsModel] = useState<'timbre-v3.0' | 'timbre-v2.5'>('timbre-v3.0');
   const [newVoice, setNewVoice] = useState('Shivani');
   const [newSeverity, setNewSeverity] = useState<'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'>('HIGH');
-  const [newChannel, setNewChannel] = useState<'standard' | 'tel_8k'>('standard');
   const [newReferenceText, setNewReferenceText] = useState('');
   const [newCriticalPhrases, setNewCriticalPhrases] = useState('');
   const [creatingCase, setCreatingCase] = useState(false);
 
-  // Load all Test Cases
+  // New Pin Form State
+  const [pinCategory, setPinCategory] = useState<string>('END_TRUNCATION');
+  const [pinSeverity, setPinSeverity] = useState<string>('CRITICAL');
+  const [pinNote, setPinNote] = useState<string>('Audible syllable drop on closing disclosure');
+
+  // Load Test Cases
   const loadCases = async () => {
     try {
       setLoadingCases(true);
@@ -88,32 +95,35 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
 
   const activeCase = cases.find(c => c.id === selectedCaseId) || cases[0];
 
-  // Auto-generate / fetch baseline run when switching case
+  // Auto-set voice when changing scenario
   useEffect(() => {
     if (!activeCase) return;
-    // Set voice persona defaults based on case
     if (activeCase.tts_model === 'timbre-v2.5') {
       setSelectedModel('timbre-v2.5');
-      setSelectedVoice('Nalini');
+      setSelectedVoice('Nalini - Fluent Telephony');
     } else {
       setSelectedModel('timbre-v3.0');
-      setSelectedVoice('Shivani');
+      setSelectedVoice('Shivani - Warm & Conversational');
     }
   }, [selectedCaseId]);
 
   // Handle Speech Generation
-  const handleGenerate = async (fault?: string) => {
+  const handleGenerate = async () => {
     if (!activeCase) return;
     try {
       setGenerating(true);
-      const faultParam = activeCase.id === 'TC-014' ? fault || injectFault : undefined;
-      const res = await triggerGenerateRun(activeCase.id, faultParam, selectedModel, selectedVoice);
+      // Clean voice name (strip description)
+      const cleanVoice = selectedVoice.split(' - ')[0].trim();
+      const res = await triggerGenerateRun(activeCase.id, undefined, selectedModel, cleanVoice);
       const runData = await fetchRun(res.run_id);
       setActiveRun(runData);
 
-      // Auto-switch right tab to pins/capsule if defects found
+      // Auto-set highlight region if pin or truncation found
       if (runData.findings && runData.findings.length > 0) {
-        setRightTab('pins');
+        const f = runData.findings[0];
+        if (f.region_start_s != null && f.region_end_s != null) {
+          setHighlightRegion([f.region_start_s, f.region_end_s]);
+        }
       }
     } catch (err) {
       alert(`Synthesis failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -123,44 +133,41 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
   };
 
   // Add Defect Pin
-  const handleAddPin = async (pinData: {
-    timestamp_start_s: number;
-    timestamp_end_s: number;
-    category: string;
-    severity: string;
-    note: string;
-  }) => {
+  const handleAddPinSubmit = async () => {
     if (!activeRun) return;
-    const updated = await addDefectPin(activeRun.id, pinData);
-    setActiveRun(updated);
+    try {
+      const pinPayload = {
+        timestamp_start_s: Number(pinTime.toFixed(2)),
+        timestamp_end_s: Number((pinTime + 0.67).toFixed(2)),
+        category: pinCategory as any,
+        severity: pinSeverity as any,
+        note: pinNote
+      };
+      const updated = await addDefectPin(activeRun.id, pinPayload);
+      setActiveRun(updated);
+      setShowAddPinModal(false);
+      setRightTab('pins');
+    } catch (err) {
+      alert(`Failed to add pin: ${err}`);
+    }
   };
 
-  // Remove Defect Pin
-  const handleRemovePin = async (pinId: string) => {
-    if (!activeRun) return;
-    const updated = await removeDefectPin(activeRun.id, pinId);
-    setActiveRun(updated);
-  };
-
-  // Compile Capsule from Confirmed Finding or Defect Pin
+  // Compile Capsule
   const handleCompileCapsule = async () => {
     if (!activeRun) return;
     try {
       setCompilingCapsule(true);
-      // Find candidate finding (e.g. truncation or critical phrase missing)
       const candFinding = activeRun.findings.find(f => f.status === 'FAIL' || f.status === 'SUSPECTED') || activeRun.findings[0];
       if (!candFinding) {
         alert('No failure finding detected to compile capsule from.');
         return;
       }
 
-      // 1. Confirm finding
       await updateFinding(candFinding.id, {
         review_state: 'HUMAN_CONFIRMED',
         reviewer_note: 'Verified speech defect anchored via Pro Workbench Defect Pin.'
       });
 
-      // 2. Compile capsule
       const cap = await compileCapsule(candFinding.id);
       setActiveCapsule(cap);
       setRightTab('capsule');
@@ -172,7 +179,24 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
     }
   };
 
-  // Rerun Regression with Replacement Speech
+  // Validate Capsule SHA-256 Byte Digest
+  const handleVerifyCapsuleHash = async (capsuleId: string) => {
+    try {
+      setVerifyingHash(true);
+      const res = await validateCapsuleIntegrity(capsuleId);
+      if (res.valid) {
+        setIntegrityStatus(`VERIFIED: Byte hash match (${res.computed_sha256.substring(0, 16)}...)`);
+      } else {
+        setIntegrityStatus(`TAMPER DETECTED: Hash mismatch!`);
+      }
+    } catch (err) {
+      setIntegrityStatus(`Verification error: ${err}`);
+    } finally {
+      setVerifyingHash(false);
+    }
+  };
+
+  // Rerun Regression
   const handleRerunRegression = async () => {
     if (!activeCapsule) return;
     try {
@@ -180,7 +204,6 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
       const rr = await rerunRegression(activeCapsule.id, true);
       setRegressionRun(rr);
 
-      // Fetch the newly generated run so we can dual-track compare
       const regRunData = await fetchRun(rr.run_id);
       setFixedRun(regRunData);
     } catch (err) {
@@ -203,880 +226,913 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
     }
   };
 
-  // CSV Import
-  const handleCsvImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Duplicate Scenario
+  const handleDuplicateCase = async (caseId: string) => {
     try {
-      setCsvUploading(true);
-      const res = await importCasesCsv(file, 'suite-insurance-hi');
-      alert(`Successfully imported ${res.imported} scenarios.`);
+      const cloned = await duplicateTestCase(caseId);
       await loadCases();
+      setSelectedCaseId(cloned.id);
+      alert(`Duplicated scenario as ${cloned.id}`);
     } catch (err) {
-      alert(`CSV import error: ${err}`);
-    } finally {
-      setCsvUploading(false);
-      e.target.value = '';
+      alert(`Duplication failed: ${err}`);
     }
   };
 
-  // Preset Autofill for Quick Scenario Creation
-  const applyPreset = (preset: 'health' | 'motor' | 'ivr') => {
-    if (preset === 'health') {
-      setNewScenario('Health Cashless Claim Pre-Auth');
-      setNewLanguage('hi-IN');
-      setNewTtsModel('timbre-v3.0');
-      setNewVoice('Shivani');
-      setNewSeverity('HIGH');
-      setNewChannel('standard');
-      setNewReferenceText('नमस्ते, आपका अपोलो हॉस्पिटल में ₹45,000 का कैशलेस क्लेम मंज़ूर हो गया है। कृपया डिस्चार्ज के समय मूल दस्तावेज काउंटर पर प्रस्तुत करें।');
-      setNewCriticalPhrases('₹45,000, अपोलो हॉस्पिटल, कैशलेस क्लेम');
-    } else if (preset === 'motor') {
-      setNewScenario('Motor Insurance NCB Renewal Alert');
-      setNewLanguage('hinglish');
-      setNewTtsModel('timbre-v3.0');
-      setNewVoice('Avinash');
-      setNewSeverity('CRITICAL');
-      setNewChannel('standard');
-      setNewReferenceText('Hello, आपकी Swift Dzire की कार बीमा पॉलिसी 24 November को समाप्त हो रही है। 50% No Claim Bonus सुरक्षित रखने के लिए आज ही रिन्यू करें।');
-      setNewCriticalPhrases('Swift Dzire, 24 November, 50% No Claim Bonus');
-    } else if (preset === 'ivr') {
-      setNewScenario('Telephony Premium Reminder');
-      setNewLanguage('hi-IN');
-      setNewTtsModel('timbre-v2.5');
-      setNewVoice('Nalini');
-      setNewSeverity('HIGH');
-      setNewChannel('tel_8k');
-      setNewReferenceText('प्रिय ग्राहक, आपकी जीवन बीमा प्रीमियम ₹3,200 15 तारीख तक देय है। लेट फीस से बचने के लिए तुरंत भुगतान करें।');
-      setNewCriticalPhrases('₹3,200, 15 तारीख, जीवन बीमा');
-    }
-  };
-
-  // Create Scenario Handler
-  const handleCreateCase = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newScenario.trim() || !newReferenceText.trim()) {
-      alert('Please provide both Scenario Title and Reference Spoken Text.');
-      return;
-    }
-    try {
-      setCreatingCase(true);
-      const phrases = newCriticalPhrases
-        .split(',')
-        .map(p => p.trim())
-        .filter(p => p.length > 0)
-        .map(p => ({
-          text: p,
-          variants: [],
-          severity: newSeverity
-        }));
-
-      const created = await createTestCase({
-        suite_id: 'suite-insurance-hi',
-        scenario: newScenario.trim(),
-        language: newLanguage,
-        reference_text: newReferenceText.trim(),
-        critical_phrases: phrases,
-        tts_model: newTtsModel,
-        voice: newVoice,
-        severity: newSeverity,
-        channel: newChannel,
-        speed: 1.0,
-      });
-
-      setShowNewCaseModal(false);
-      setNewScenario('');
-      setNewReferenceText('');
-      setNewCriticalPhrases('');
-
-      await loadCases();
-      setSelectedCaseId(created.id);
-      alert(`Scenario ${created.id} created successfully! Ready for multi-model synthesis.`);
-    } catch (err) {
-      alert(`Failed to create scenario: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setCreatingCase(false);
-    }
-  };
-
-  const [hashStatus, setHashStatus] = useState<{ checked: boolean; valid: boolean; computed?: string } | null>(null);
-
-  const handleDuplicateCase = async () => {
-    if (!activeCase) return;
-    try {
-      const dup = await duplicateTestCase(activeCase.id);
-      await loadCases();
-      setSelectedCaseId(dup.id);
-      alert(`Scenario duplicated successfully as ${dup.id}!`);
-    } catch (err) {
-      alert(`Failed to duplicate scenario: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
-
-  const handleValidateHash = async () => {
-    if (!activeCapsule) return;
-    try {
-      const res = await validateCapsuleIntegrity(activeCapsule.id);
-      setHashStatus({ checked: true, valid: res.valid, computed: res.computed_sha256 });
-    } catch (err) {
-      alert(`Hash validation failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
-
-  // Filtered cases list
+  // Filtered Scenario list
   const filteredCases = cases.filter(c => {
-    const matchesSearch = c.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.scenario.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.reference_text.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = c.scenario.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          c.id.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesLang = languageFilter === 'ALL' || c.language === languageFilter;
     return matchesSearch && matchesLang;
   });
 
+  // Calculate current workflow step (1 to 6)
+  const getWorkflowStep = () => {
+    if (activeCapsule?.state === 'RESOLVED') return 6;
+    if (regressionRun) return 6;
+    if (activeCapsule) return 5;
+    if (activeRun?.findings?.some(f => f.review_state === 'HUMAN_CONFIRMED')) return 4;
+    if (activeRun?.audio_path) return 3;
+    if (activeCase) return 2;
+    return 1;
+  };
+
+  const workflowStep = getWorkflowStep();
+
   return (
-    <>
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-[calc(100vh-100px)]">
-      {/* =========================================================================
-          LEFT PANE: SCENARIO & TEST EXPLORER (3 Cols)
-          ========================================================================= */}
-      <div className="lg:col-span-3 bg-[#11141B] border border-[#1D2230] rounded-xl p-3.5 flex flex-col h-full overflow-hidden shadow-xl">
-        {/* Explorer Header */}
-        <div className="pb-3 border-b border-[#1D2230] space-y-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-[#F3F4F6] flex items-center gap-1.5">
-                <span>Scenarios</span>
-                <span className="text-xs font-mono font-normal text-[#4F8CFF]">({cases.length})</span>
-              </h2>
-              <p className="text-[10px] text-[#64748B]">Insurance Indic Voice Suite</p>
+    <div className="flex-1 flex overflow-hidden h-[calc(100vh-64px)] bg-[#F8FAFC]">
+      {/* ============================================================== */}
+      {/* 1. LEFT SIDEBAR: SCENARIO EXPLORER (Reference Image B)         */}
+      {/* ============================================================== */}
+      <aside className="w-[280px] lg:w-[300px] shrink-0 bg-white border-r border-[#E7ECF3] flex flex-col h-full shadow-[1px_0_2px_rgba(0,0,0,0.02)]">
+        {/* Header with Title, Suite Subtitle, and Plus Button */}
+        <div className="p-4 border-b border-[#E7ECF3]">
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold text-[#172033]">Scenarios</h2>
+              <span className="text-[11px] font-mono font-medium px-2 py-0.5 rounded-full bg-[#EEF4FF] text-[#3867E8]">
+                {cases.length}
+              </span>
             </div>
-
-            <div className="flex items-center gap-1.5">
-              <label
-                title="Import CSV"
-                className="p-1.5 rounded-lg bg-[#171C26] hover:bg-[#222938] text-[#94A3B8] hover:text-white border border-[#222938] cursor-pointer transition-colors"
-              >
-                {csvUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                <input type="file" accept=".csv" onChange={handleCsvImport} disabled={csvUploading} className="hidden" />
-              </label>
-
-              <a
-                href="/api/cases/export?format=csv"
-                download="test_cases.csv"
-                title="Export Cases CSV"
-                className="p-1.5 rounded-lg bg-[#171C26] hover:bg-[#222938] text-[#94A3B8] hover:text-white border border-[#222938] transition-colors"
-              >
-                <Download className="w-3.5 h-3.5 text-[#2FBF71]" />
-              </a>
-
-              <button
-                onClick={() => setShowNewCaseModal(true)}
-                title="New Scenario"
-                className="p-1.5 rounded-lg bg-[#4F8CFF] hover:bg-[#3D78E6] text-white transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            {/* Compact Plus Button */}
+            <button
+              onClick={() => setShowNewCaseModal(true)}
+              className="w-6 h-6 rounded-md bg-[#3867E8] text-white flex items-center justify-center hover:bg-[#2C56CE] shadow-xs transition-colors"
+              title="Add New Scenario"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
           </div>
+          <p className="text-[11px] text-[#64748B]">Insurance Indic Voice Suite</p>
 
-          {/* Search Bar */}
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[#64748B]" />
+          {/* Search Field */}
+          <div className="mt-3 relative">
+            <Search className="w-3.5 h-3.5 text-[#94A3B8] absolute left-2.5 top-1/2 transform -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Filter scenarios or Devanagari..."
+              placeholder="Search scenarios..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-[#080A0E] border border-[#222938] rounded-lg pl-8 pr-3 py-1.5 text-xs text-[#F3F4F6] placeholder-[#64748B] outline-none focus:border-[#4F8CFF]"
+              className="w-full pl-8 pr-3 py-1.5 text-xs bg-[#F8FAFC] border border-[#E7ECF3] rounded-lg focus:outline-none focus:border-[#3867E8] text-[#172033] placeholder-[#94A3B8]"
             />
           </div>
 
-          {/* Filter Pills */}
-          <div className="flex items-center gap-1 text-[10px] font-mono">
-            {(['ALL', 'hi-IN', 'hinglish'] as const).map(f => (
+          {/* Language Filters Row */}
+          <div className="flex items-center justify-between gap-1 mt-3">
+            <div className="flex items-center gap-1">
               <button
-                key={f}
-                onClick={() => setLanguageFilter(f)}
-                className={`px-2 py-0.5 rounded transition-colors ${
-                  languageFilter === f
-                    ? 'bg-[#4F8CFF]/20 text-[#4F8CFF] border border-[#4F8CFF]/40 font-bold'
-                    : 'text-[#64748B] hover:text-[#94A3B8]'
+                onClick={() => setLanguageFilter('ALL')}
+                className={`px-2.5 py-1 text-[11px] font-medium rounded-full transition-colors ${
+                  languageFilter === 'ALL'
+                    ? 'bg-[#EEF4FF] text-[#3867E8] font-semibold'
+                    : 'text-[#64748B] hover:text-[#172033]'
                 }`}
               >
-                {f}
+                All
               </button>
-            ))}
+              <button
+                onClick={() => setLanguageFilter('hi-IN')}
+                className={`px-2.5 py-1 text-[11px] font-medium rounded-full transition-colors ${
+                  languageFilter === 'hi-IN'
+                    ? 'bg-[#EEF4FF] text-[#3867E8] font-semibold'
+                    : 'text-[#64748B] hover:text-[#172033]'
+                }`}
+              >
+                Hindi
+              </button>
+              <button
+                onClick={() => setLanguageFilter('hinglish')}
+                className={`px-2.5 py-1 text-[11px] font-medium rounded-full transition-colors ${
+                  languageFilter === 'hinglish'
+                    ? 'bg-[#EEF4FF] text-[#3867E8] font-semibold'
+                    : 'text-[#64748B] hover:text-[#172033]'
+                }`}
+              >
+                Hinglish
+              </button>
+            </div>
+            <button
+              onClick={() => alert('Filter options: hi-IN, Hinglish, Standard, Telephony')}
+              className="p-1 rounded text-[#94A3B8] hover:text-[#172033]"
+            >
+              <Filter className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
 
-        {/* Scenarios List */}
-        <div className="space-y-1.5 overflow-y-auto flex-1 pr-1 pt-2">
-          {filteredCases.map(c => {
-            const isSelected = selectedCaseId === c.id;
-            return (
-              <div
-                key={c.id}
-                onClick={() => setSelectedCaseId(c.id)}
-                className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
-                  isSelected
-                    ? 'bg-[#171C26] border-[#4F8CFF] shadow-sm'
-                    : 'bg-[#11141B]/60 border-[#1D2230] hover:border-[#4F8CFF]/30'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-1 mb-1">
-                  <span className="font-mono text-xs font-bold text-[#4F8CFF]">{c.id}</span>
-                  <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded uppercase border ${
-                    c.severity === 'CRITICAL'
-                      ? 'bg-[#EF4444]/15 text-[#EF4444] border-[#EF4444]/30'
-                      : 'bg-[#080A0E] text-[#64748B] border-[#222938]'
+        {/* Scenario List */}
+        <div className="flex-1 overflow-y-auto divide-y divide-[#F1F5F9]">
+          {loadingCases ? (
+            <div className="p-4 text-center text-xs text-[#94A3B8] flex items-center justify-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-[#3867E8]" />
+              <span>Loading scenarios...</span>
+            </div>
+          ) : filteredCases.length === 0 ? (
+            <div className="p-4 text-center text-xs text-[#94A3B8]">
+              No matching scenarios found.
+            </div>
+          ) : (
+            filteredCases.map(c => {
+              const isSelected = c.id === selectedCaseId;
+              return (
+                <div
+                  key={c.id}
+                  onClick={() => setSelectedCaseId(c.id)}
+                  className={`p-3 cursor-pointer transition-all ${
+                    isSelected
+                      ? 'bg-[#EEF4FF] border-l-4 border-l-[#3867E8]'
+                      : 'hover:bg-[#F8FAFC]'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className={`text-xs font-mono font-bold ${
+                      isSelected ? 'text-[#3867E8]' : 'text-[#172033]'
+                    }`}>
+                      {c.id}
+                    </span>
+                    <span className={`text-[10px] font-medium px-1.5 py-0.2 rounded-full ${
+                      c.severity === 'CRITICAL'
+                        ? 'bg-[#FFF0F0] text-[#D94848]'
+                        : 'bg-[#FFF0F0] text-[#D94848]'
+                    }`}>
+                      {c.severity === 'CRITICAL' ? 'Critical' : 'High'}
+                    </span>
+                  </div>
+                  <p className={`text-xs truncate ${
+                    isSelected ? 'font-semibold text-[#172033]' : 'text-[#64748B]'
                   }`}>
-                    {c.severity}
-                  </span>
+                    {c.scenario}
+                  </p>
                 </div>
-                <div className="text-xs font-medium text-[#F3F4F6] line-clamp-1 mb-0.5">
-                  {c.scenario}
-                </div>
-                <div className="text-[10px] text-[#94A3B8] line-clamp-1 font-devanagari">
-                  {c.reference_text}
-                </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
 
-        {/* Left Pane Footer: New Scenario Action */}
-        <div className="pt-2.5 mt-auto border-t border-[#1D2230]">
+        {/* Bottom Create Scenario Button */}
+        <div className="p-3 border-t border-[#E7ECF3] bg-white">
           <button
             onClick={() => setShowNewCaseModal(true)}
-            className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg bg-[#171C26] hover:bg-[#212836] text-[#4F8CFF] hover:text-white border border-[#4F8CFF]/30 hover:border-[#4F8CFF] transition-all shadow-sm"
+            className="w-full py-2 px-3 border border-[#E7ECF3] bg-white hover:bg-[#F8FAFC] text-[#3867E8] font-medium text-xs rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-colors"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Create New Scenario</span>
+            <Plus className="w-3.5 h-3.5 text-[#3867E8]" />
+            <span>Create Scenario</span>
           </button>
         </div>
-      </div>
+      </aside>
 
-      {/* =========================================================================
-          CENTER STAGE: MULTI-MODEL ARENA & DUAL-TRACK WAVEFORM (6 Cols)
-          ========================================================================= */}
-      <div className="lg:col-span-6 flex flex-col h-full overflow-y-auto space-y-4 pr-1">
-        {activeCase ? (
-          <>
-            {/* Ground Truth Scenario Bar */}
-            <div className="bg-[#11141B] border border-[#1D2230] rounded-xl p-4 shadow-lg space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-sm font-bold text-[#4F8CFF]">{activeCase.id}</span>
-                  <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-[#080A0E] border border-[#222938] text-[#94A3B8]">
-                    {activeCase.language}
-                  </span>
-                  <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-[#080A0E] border border-[#222938] text-[#94A3B8]">
-                    {activeCase.channel}
-                  </span>
-                </div>
+      {/* ============================================================== */}
+      {/* 2. CENTRE WORKSPACE: MAIN CONTENT (Reference Image B)          */}
+      {/* ============================================================== */}
+      <main className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+        {/* A. Workflow Progress Indicator (Reference Image B) */}
+        <div className="bg-white border border-[#E7ECF3] rounded-xl px-5 py-3 shadow-sm">
+          <div className="flex items-center justify-between max-w-2xl mx-auto">
+            {/* Step 1: Scenario */}
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 rounded-full bg-[#16A36A] text-white flex items-center justify-center text-[10px]">
+                ✓
+              </div>
+              <span className="text-xs font-medium text-[#172033]">Scenario</span>
+            </div>
+            <div className="w-8 h-0.5 bg-[#E2E8F0]" />
 
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#EF4444] font-bold">
-                    {activeCase.severity} SEVERITY
-                  </span>
+            {/* Step 2: Generate */}
+            <div className="flex items-center gap-2">
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${
+                workflowStep >= 2 ? 'bg-[#16A36A] text-white' : 'bg-[#E2E8F0] text-[#64748B]'
+              }`}>
+                {workflowStep >= 3 ? '✓' : '2'}
+              </div>
+              <span className={`text-xs font-medium ${workflowStep >= 2 ? 'text-[#172033]' : 'text-[#64748B]'}`}>
+                Generate
+              </span>
+            </div>
+            <div className="w-8 h-0.5 bg-[#E2E8F0]" />
 
-                  <button
-                    onClick={handleDuplicateCase}
-                    title="Duplicate Scenario"
-                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono rounded bg-[#171C26] hover:bg-[#222938] text-[#94A3B8] hover:text-[#F3F4F6] border border-[#222938] transition-colors"
-                  >
-                    <Copy className="w-3 h-3 text-[#4F8CFF]" />
-                    <span>Duplicate</span>
-                  </button>
-                </div>
+            {/* Step 3: Inspect */}
+            <div className="flex items-center gap-2">
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                workflowStep >= 3 ? 'bg-[#3867E8] text-white shadow-xs' : 'bg-[#E2E8F0] text-[#64748B]'
+              }`}>
+                3
+              </div>
+              <span className={`text-xs font-medium ${workflowStep >= 3 ? 'text-[#3867E8] font-semibold' : 'text-[#64748B]'}`}>
+                Inspect
+              </span>
+            </div>
+            <div className="w-8 h-0.5 bg-[#E2E8F0]" />
+
+            {/* Step 4: Review */}
+            <div className="flex items-center gap-2">
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${
+                workflowStep >= 4 ? 'bg-[#16A36A] text-white' : 'bg-[#E2E8F0] text-[#64748B]'
+              }`}>
+                {workflowStep >= 5 ? '✓' : '4'}
+              </div>
+              <span className={`text-xs font-medium ${workflowStep >= 4 ? 'text-[#172033]' : 'text-[#64748B]'}`}>
+                Review
+              </span>
+            </div>
+            <div className="w-8 h-0.5 bg-[#E2E8F0]" />
+
+            {/* Step 5: Capsule */}
+            <div className="flex items-center gap-2">
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${
+                workflowStep >= 5 ? 'bg-[#16A36A] text-white' : 'bg-[#E2E8F0] text-[#64748B]'
+              }`}>
+                {workflowStep >= 6 ? '✓' : '5'}
+              </div>
+              <span className={`text-xs font-medium ${workflowStep >= 5 ? 'text-[#172033]' : 'text-[#64748B]'}`}>
+                Capsule
+              </span>
+            </div>
+            <div className="w-8 h-0.5 bg-[#E2E8F0]" />
+
+            {/* Step 6: Regression */}
+            <div className="flex items-center gap-2">
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${
+                workflowStep >= 6 ? 'bg-[#16A36A] text-white' : 'bg-[#E2E8F0] text-[#64748B]'
+              }`}>
+                6
+              </div>
+              <span className={`text-xs font-medium ${workflowStep >= 6 ? 'text-[#16A36A] font-semibold' : 'text-[#64748B]'}`}>
+                Regression
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* B. Scenario Header & Spoken Ground Truth (Reference Image B) */}
+        {activeCase && (
+          <div className="bg-white border border-[#E7ECF3] rounded-xl p-5 shadow-sm space-y-4">
+            {/* Top Row: Case ID, Badges, Severity Pill */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-xl font-bold tracking-tight text-[#172033]">
+                  {activeCase.id}
+                </h1>
+                <span className="text-xs font-medium px-2 py-0.5 rounded bg-[#F4F7FB] text-[#64748B] border border-[#E7ECF3]">
+                  {activeCase.language === 'hinglish' ? 'Hinglish' : 'Hindi'}
+                </span>
+                <span className="text-xs font-medium px-2 py-0.5 rounded bg-[#F4F7FB] text-[#64748B] border border-[#E7ECF3]">
+                  {activeCase.channel === 'tel_8k' ? 'Telephony' : 'Standard'}
+                </span>
               </div>
 
-              <h1 className="text-base font-bold text-[#F3F4F6]">{activeCase.scenario}</h1>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleDuplicateCase(activeCase.id)}
+                  title="Clone Scenario"
+                  className="p-1 rounded text-[#94A3B8] hover:text-[#172033] hover:bg-[#F4F7FB]"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+                <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-[#FFF0F0] text-[#D94848] border border-[#FDD8D8]">
+                  {activeCase.severity === 'CRITICAL' ? 'Critical Severity' : 'High Severity'}
+                </span>
+              </div>
+            </div>
 
-              {/* Reference Ground Truth */}
-              <div className="bg-[#080A0E] border border-[#1D2230] rounded-lg p-3">
-                <div className="text-[10px] font-mono uppercase text-[#64748B] mb-1 flex items-center justify-between">
-                  <span>Reference Spoken Ground Truth</span>
-                  <span className="text-[#4F8CFF]">{activeCase.reference_text.length} chars</span>
+            {/* Scenario Title */}
+            <h2 className="text-base font-semibold text-[#172033]">
+              {activeCase.scenario}
+            </h2>
+
+            {/* Reference Spoken Ground Truth Box (Reference Image B) */}
+            <div className="bg-[#FAFBFD] border border-[#E7ECF3] rounded-lg p-3.5 space-y-2.5">
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 rounded bg-[#EEF4FF] text-[#3867E8] flex items-center justify-center">
+                  <FileText className="w-3.5 h-3.5" />
                 </div>
-                <p className="font-devanagari text-sm text-[#F3F4F6] leading-relaxed">
-                  {activeCase.reference_text}
-                </p>
+                <span className="text-xs font-semibold text-[#172033]">
+                  Reference Spoken Ground Truth
+                </span>
+                <span className="text-[11px] font-mono text-[#94A3B8] ml-auto">
+                  {activeCase.reference_text.length} chars
+                </span>
               </div>
 
-              {/* Critical Phrases Tags */}
-              <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                <span className="text-[10px] font-mono text-[#64748B] uppercase">Mandatory:</span>
+              <p className="font-devanagari text-xs text-[#172033] leading-relaxed pl-7">
+                "{activeCase.reference_text}"
+              </p>
+
+              {/* Mandatory Tokens Chips */}
+              <div className="flex items-center gap-2 pl-7 pt-1 text-xs">
+                <span className="text-[#64748B] text-[11px]">Mandatory:</span>
                 {activeCase.critical_phrases.map((cp, idx) => (
                   <span
                     key={idx}
-                    className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded bg-[#171C26] border border-[#222938] text-[#F3F4F6]"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#EEF4FF] text-[#3867E8] text-[11px] font-medium"
                   >
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#4F8CFF]" />
-                    <span className="font-devanagari">{cp.text}</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#3867E8]" />
+                    <span>{cp.text}</span>
                   </span>
                 ))}
               </div>
             </div>
-
-            {/* Gnani Voice Engine Arena Selector */}
-            <ModelArenaSelector
-              selectedModel={selectedModel}
-              selectedVoice={selectedVoice}
-              onModelChange={setSelectedModel}
-              onVoiceChange={setSelectedVoice}
-            />
-
-            {/* Synthesis Triggers & Demo Fault Switch */}
-            <div className="bg-[#11141B] border border-[#1D2230] rounded-xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
-              <div className="flex items-center gap-3 w-full sm:w-auto">
-                <button
-                  onClick={() => handleGenerate()}
-                  disabled={generating}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-[#4F8CFF] hover:bg-[#3D78E6] disabled:opacity-50 text-white transition-all shadow-md active:scale-95"
-                >
-                  {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
-                  <span>Generate with {selectedModel}</span>
-                </button>
-
-                {activeCase.id === 'TC-014' && (
-                  <select
-                    value={injectFault}
-                    onChange={(e) => setInjectFault(e.target.value)}
-                    className="bg-[#171C26] border border-[#222938] text-xs font-mono text-[#F5A524] px-2.5 py-2 rounded-lg outline-none"
-                  >
-                    <option value="END_TRUNCATION">Injected Test Fault (Truncation)</option>
-                    <option value="FIXED">Clean Speech (No Fault)</option>
-                  </select>
-                )}
-              </div>
-
-              {activeRun && (
-                <div className="text-[11px] font-mono text-[#64748B]">
-                  Active Run: <span className="text-[#4F8CFF]">{activeRun.id}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Pro Waveform Player & A/B Scrubber */}
-            {activeRun && (
-              <ProWaveformPlayer
-                primaryAudioUrl={getAudioUrl(activeRun.id)}
-                comparisonAudioUrl={fixedRun ? getAudioUrl(fixedRun.id) : undefined}
-                primaryLabel={`${activeRun.tts_model || 'Timbre'} (${activeRun.tts_voice || 'Shivani'})`}
-                comparisonLabel={fixedRun ? `Fixed: ${fixedRun.tts_model} (${fixedRun.tts_voice})` : undefined}
-                defectPins={activeRun.defect_pins || []}
-                highlightRegion={highlightRegion}
-                onRegionSelected={(start, end) => setHighlightRegion([start, end])}
-                onAddPinRequested={(time) => {
-                  setHighlightRegion([Math.max(0, time - 0.5), time + 1.0]);
-                  setRightTab('pins');
-                }}
-              />
-            )}
-
-            {/* Dual-ASR Jury (Prisma v2.5 vs Prisma v3.0) */}
-            {activeRun && activeRun.stt_dual_results && (
-              <DualAsrJury
-                dualResults={activeRun.stt_dual_results}
-                expectedText={activeCase.reference_text}
-              />
-            )}
-
-            {/* Transcript Diff */}
-            {activeRun && (
-              <div className="bg-[#11141B] border border-[#1D2230] rounded-xl p-4 shadow-lg space-y-2">
-                <div className="text-xs font-bold text-[#F3F4F6] uppercase tracking-wider mb-2">
-                  Recognized Speech Content Fidelity
-                </div>
-                <TranscriptDiff
-                  referenceText={activeCase.reference_text}
-                  transcriptText={activeRun.transcript_text || ''}
-                  criticalPhrases={activeCase.critical_phrases}
-                  wer={activeRun.metrics?.wer}
-                  cer={activeRun.metrics?.cer}
-                />
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="p-12 text-center text-xs text-[#64748B]">
-            Select a test case to start evaluation.
           </div>
         )}
-      </div>
 
-      {/* =========================================================================
-          RIGHT DRAWER: TELEMETRY & DEFECT CAPSULE INSPECTOR (3 Cols)
-          ========================================================================= */}
-      <div className="lg:col-span-3 bg-[#11141B] border border-[#1D2230] rounded-xl p-3.5 flex flex-col h-full overflow-hidden shadow-xl">
-        {/* Drawer Tabs */}
-        <div className="grid grid-cols-3 gap-1 bg-[#171C26] p-1 rounded-lg border border-[#222938] mb-3 text-xs font-mono">
+        {/* C. Voice Generation Configuration Row (Reference Image B) */}
+        <div className="bg-white border border-[#E7ECF3] rounded-xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-6 h-6 rounded-md bg-[#EEF4FF] text-[#3867E8] flex items-center justify-center">
+              <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                <path d="M4 10a1 1 0 0 0-1 1v2a1 1 0 0 0 2 0v-2a1 1 0 0 0-1-1zm4-4a1 1 0 0 0-1 1v10a1 1 0 0 0 2 0V7a1 1 0 0 0-1-1zm4-3a1 1 0 0 0-1 1v16a1 1 0 0 0 2 0V4a1 1 0 0 0-1-1zm4 5a1 1 0 0 0-1 1v10a1 1 0 0 0 2 0V9a1 1 0 0 0-1-1zm4 3a1 1 0 0 0-1 1v4a1 1 0 0 0 2 0v-4a1 1 0 0 0-1-1z" />
+              </svg>
+            </div>
+            <span className="text-xs font-semibold text-[#172033]">Voice Engine</span>
+          </div>
+
+          <div className="flex-1 flex flex-wrap items-center gap-3 w-full sm:w-auto">
+            {/* Model Selector Dropdown */}
+            <div className="relative flex-1 min-w-[170px]">
+              <select
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value as any)}
+                className="w-full text-xs font-medium text-[#172033] bg-[#F8FAFC] border border-[#E7ECF3] rounded-lg px-3 py-2 pr-8 appearance-none focus:outline-none focus:border-[#3867E8] cursor-pointer"
+              >
+                <option value="timbre-v3.0">Timbre v3.0 (Expressive)</option>
+                <option value="timbre-v2.5">Timbre v2.5 (Telephony)</option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-[#64748B] absolute right-2.5 top-1/2 transform -translate-y-1/2 pointer-events-none" />
+            </div>
+
+            {/* Voice Persona Dropdown */}
+            <div className="relative flex-1 min-w-[200px]">
+              <select
+                value={selectedVoice}
+                onChange={(e) => setSelectedVoice(e.target.value)}
+                className="w-full text-xs font-medium text-[#172033] bg-[#F8FAFC] border border-[#E7ECF3] rounded-lg px-3 py-2 pr-8 appearance-none focus:outline-none focus:border-[#3867E8] cursor-pointer"
+              >
+                <option value="Shivani - Warm & Conversational">Shivani - Warm & Conversational</option>
+                <option value="Avinash - Authoritative">Avinash - Authoritative</option>
+                <option value="Lakshmi - Empathetic">Lakshmi - Empathetic</option>
+                <option value="Kalpana - Professional">Kalpana - Professional</option>
+                <option value="Nalini - Fluent Telephony">Nalini - Fluent Telephony</option>
+                <option value="Deepak - Confident">Deepak - Confident</option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-[#64748B] absolute right-2.5 top-1/2 transform -translate-y-1/2 pointer-events-none" />
+            </div>
+          </div>
+
+          {/* Primary Action Button: Generate Speech */}
           <button
-            onClick={() => setRightTab('radar')}
-            className={`py-1 rounded text-center transition-colors ${
-              rightTab === 'radar' ? 'bg-[#4F8CFF] text-white font-bold' : 'text-[#94A3B8] hover:text-white'
-            }`}
+            onClick={handleGenerate}
+            disabled={generating}
+            className="w-full sm:w-auto px-5 py-2 rounded-lg bg-[#3867E8] hover:bg-[#2C56CE] text-white font-medium text-xs flex items-center justify-center gap-2 shadow-sm transition-transform active:scale-95 disabled:opacity-50 shrink-0"
           >
-            Radar
-          </button>
-          <button
-            onClick={() => setRightTab('pins')}
-            className={`py-1 rounded text-center transition-colors ${
-              rightTab === 'pins' ? 'bg-[#EF4444] text-white font-bold' : 'text-[#94A3B8] hover:text-white'
-            }`}
-          >
-            Pins ({activeRun?.defect_pins?.length || 0})
-          </button>
-          <button
-            onClick={() => setRightTab('capsule')}
-            className={`py-1 rounded text-center transition-colors ${
-              rightTab === 'capsule' ? 'bg-[#8B5CF6] text-white font-bold' : 'text-[#94A3B8] hover:text-white'
-            }`}
-          >
-            Capsule
+            {generating ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Synthesizing...</span>
+              </>
+            ) : (
+              <>
+                <span>►</span>
+                <span>Generate Speech</span>
+              </>
+            )}
           </button>
         </div>
 
-        {/* Tab 1: Acoustic Radar & Telemetry */}
-        {rightTab === 'radar' && activeRun && (
-          <div className="space-y-3 overflow-y-auto flex-1 pr-1 text-xs">
-            <div className="bg-[#171C26] border border-[#222938] rounded-lg p-3 space-y-2">
-              <span className="text-[10px] font-mono text-[#64748B] uppercase">Acoustic Health Gauges</span>
-              
-              <div className="space-y-2 pt-1 font-mono">
-                <div className="flex items-center justify-between">
-                  <span className="text-[#94A3B8]">Peak Amplitude:</span>
-                  <span className="text-[#F3F4F6] font-bold">{activeRun.metrics?.peak_db?.toFixed(2) || '0.00'} dBFS</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[#94A3B8]">Clipping Sample Ratio:</span>
-                  <span className={`font-bold ${
-                    (activeRun.metrics?.clip_ratio || 0) > 0.001 ? 'text-[#EF4444]' : 'text-[#10B981]'
-                  }`}>
-                    {((activeRun.metrics?.clip_ratio || 0) * 100).toFixed(3)}%
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[#94A3B8]">Speaking Pace:</span>
-                  <span className="text-[#F3F4F6] font-bold">{activeRun.metrics?.pace_wps?.toFixed(2) || '0.00'} wps</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[#94A3B8]">Internal Silences:</span>
-                  <span className="text-[#F3F4F6] font-bold">{activeRun.metrics?.silence_regions_count || 0} gaps</span>
-                </div>
+        {/* D. Audio Inspection Panel with Waveform (Reference Image B) */}
+        <div className="bg-white border border-[#E7ECF3] rounded-xl p-5 shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold text-[#172033] uppercase tracking-wider">
+              Audio Inspection
+            </h3>
+            {activeRun && (
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-mono text-[#64748B] bg-[#F4F7FB] px-2 py-0.5 rounded border border-[#E7ECF3]">
+                  {activeRun.id}
+                </span>
+                <span className="text-[11px] font-mono font-medium text-[#172033]">
+                  {activeRun.duration_s ? `00:0${activeRun.duration_s.toFixed(3)}` : '00:05.599'}
+                </span>
               </div>
-            </div>
-
-            {/* Findings Summary */}
-            <div className="bg-[#171C26] border border-[#222938] rounded-lg p-3 space-y-2">
-              <span className="text-[10px] font-mono text-[#64748B] uppercase">
-                Active Findings ({activeRun.findings.length})
-              </span>
-
-              <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                {activeRun.findings.map(f => (
-                  <div key={f.id} className="p-2 rounded bg-[#080A0E] border border-[#222938] text-[11px] space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono font-bold text-[#EF4444]">{f.check_type}</span>
-                      <span className="text-[9px] font-mono px-1 rounded bg-[#EF4444]/15 text-[#EF4444]">
-                        {f.status}
-                      </span>
-                    </div>
-                    <p className="text-[#94A3B8] line-clamp-2">
-                      {f.evidence?.explanation || 'Acoustic finding detected.'}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* One-Click Compile Capsule CTA */}
-            <button
-              onClick={handleCompileCapsule}
-              disabled={compilingCapsule}
-              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold rounded-lg bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:opacity-50 text-white transition-all shadow-md"
-            >
-              {compilingCapsule ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-              <span>Compile Voice Defect Capsule</span>
-            </button>
+            )}
           </div>
-        )}
 
-        {/* Tab 2: Defect Pins */}
-        {rightTab === 'pins' && activeRun && (
-          <div className="flex-1 overflow-y-auto">
-            <DefectPinDrawer
-              pins={activeRun.defect_pins || []}
-              currentTime={0}
-              onAddPin={handleAddPin}
-              onRemovePin={handleRemovePin}
-              onSelectPinRegion={(start, end) => setHighlightRegion([start, end])}
+          {/* Pro Waveform Player */}
+          {activeRun?.audio_path ? (
+            <ProWaveformPlayer
+              primaryAudioUrl={getAudioUrl(activeRun.audio_path)}
+              comparisonAudioUrl={fixedRun?.audio_path ? getAudioUrl(fixedRun.audio_path) : undefined}
+              defectPins={activeRun.defect_pins || []}
+              highlightRegion={highlightRegion}
+              onRegionSelected={(s, e) => {
+                setHighlightRegion([s, e]);
+                setPinTime(s);
+              }}
+              onAddPinRequested={(time) => {
+                setPinTime(time);
+                setShowAddPinModal(true);
+              }}
             />
+          ) : (
+            <div className="h-32 border border-dashed border-[#CBD5E1] rounded-lg bg-[#FAFBFD] flex flex-col items-center justify-center gap-2 text-xs text-[#94A3B8]">
+              <Sparkles className="w-5 h-5 text-[#3867E8]" />
+              <span>Click "Generate Speech" to synthesize Indic audio with Gnani Timbre</span>
+            </div>
+          )}
+        </div>
 
-            <div className="pt-3">
+        {/* E. Speech Recognition (Dual-ASR) Comparison (Reference Image B) */}
+        <div className="bg-white border border-[#E7ECF3] rounded-xl p-5 shadow-sm space-y-3">
+          <h3 className="text-xs font-bold text-[#172033] uppercase tracking-wider">
+            Speech Recognition (Dual-ASR)
+          </h3>
+
+          <DualAsrJury
+            dualResults={activeRun?.stt_dual_results}
+            expectedText={activeCase?.reference_text || ''}
+          />
+        </div>
+      </main>
+
+      {/* ============================================================== */}
+      {/* 3. RIGHT INSPECTOR: COMPACT AUDIO HEALTH (Reference Images A & B) */}
+      {/* ============================================================== */}
+      <aside className="w-[320px] lg:w-[340px] shrink-0 bg-white border-l border-[#E7ECF3] flex flex-col h-full shadow-[-1px_0_2px_rgba(0,0,0,0.02)]">
+        {/* Tab Headers: Radar, Pins, Capsule */}
+        <div className="flex border-b border-[#E7ECF3] px-3 pt-2">
+          <button
+            onClick={() => setRightTab('radar')}
+            className={`flex-1 pb-2.5 text-xs font-semibold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
+              rightTab === 'radar'
+                ? 'border-[#3867E8] text-[#3867E8]'
+                : 'border-transparent text-[#64748B] hover:text-[#172033]'
+            }`}
+          >
+            <span>Radar</span>
+          </button>
+
+          <button
+            onClick={() => setRightTab('pins')}
+            className={`flex-1 pb-2.5 text-xs font-semibold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
+              rightTab === 'pins'
+                ? 'border-[#3867E8] text-[#3867E8]'
+                : 'border-transparent text-[#64748B] hover:text-[#172033]'
+            }`}
+          >
+            <Pin className="w-3.5 h-3.5" />
+            <span>Pins ({activeRun?.defect_pins?.length || 0})</span>
+          </button>
+
+          <button
+            onClick={() => setRightTab('capsule')}
+            className={`flex-1 pb-2.5 text-xs font-semibold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
+              rightTab === 'capsule'
+                ? 'border-[#3867E8] text-[#3867E8]'
+                : 'border-transparent text-[#64748B] hover:text-[#172033]'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>Capsule</span>
+          </button>
+        </div>
+
+        {/* Tab 1: Radar Content (Reference Image A) */}
+        {rightTab === 'radar' && (
+          <div className="flex-1 overflow-y-auto p-4 space-y-5">
+            <div>
+              <h3 className="text-xs font-bold text-[#172033] uppercase tracking-wider mb-2">
+                Audio Health & Quality
+              </h3>
+
+              {/* Compact Circular Health Gauge & Side Metrics */}
+              <CompactAudioHealth
+                run={activeRun}
+                onOpenDetails={() => setIsDetailsDrawerOpen(true)}
+              />
+            </div>
+
+            {/* Voice Defect Capsule Quick Action Card (Reference Image B) */}
+            <div className="bg-[#FAFBFD] border border-[#E7ECF3] rounded-xl p-4 space-y-2.5">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-md bg-[#EEF4FF] text-[#3867E8] flex items-center justify-center">
+                  <Layers className="w-3.5 h-3.5" />
+                </div>
+                <h4 className="text-xs font-bold text-[#172033]">Voice Defect Capsule</h4>
+              </div>
+
+              <p className="text-[11px] text-[#64748B] leading-relaxed">
+                Compile evidence to create a reproducible regression test.
+              </p>
+
               <button
                 onClick={handleCompileCapsule}
-                disabled={compilingCapsule}
-                className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold rounded-lg bg-[#EF4444] hover:bg-[#DC2626] disabled:opacity-50 text-white transition-all shadow-md"
+                disabled={compilingCapsule || !activeRun}
+                className="w-full py-2 bg-[#3867E8] hover:bg-[#2C56CE] disabled:opacity-50 text-white font-medium text-xs rounded-lg shadow-sm flex items-center justify-center gap-1.5 transition-colors"
               >
-                {compilingCapsule ? <Loader2 className="w-4 h-4 animate-spin" /> : <Pin className="w-4 h-4" />}
-                <span>Lock Evidence & Compile Capsule</span>
+                {compilingCapsule ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Sealing Hash...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Compile Capsule</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </>
+                )}
               </button>
             </div>
           </div>
         )}
 
-        {/* Tab 3: Defect Capsule & Regression Workbench */}
-        {rightTab === 'capsule' && (
-          <div className="space-y-3 overflow-y-auto flex-1 pr-1 text-xs">
-            {activeCapsule ? (
-              <div className="space-y-3">
-                <div className="bg-[#171C26] border border-[#222938] rounded-lg p-3 space-y-2">
+        {/* Tab 2: Defect Pins List */}
+        {rightTab === 'pins' && (
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-[#E7ECF3]">
+              <h4 className="text-xs font-bold text-[#172033]">Pinned Defects</h4>
+              <button
+                onClick={() => setShowAddPinModal(true)}
+                className="text-[11px] font-semibold text-[#3867E8] hover:underline flex items-center gap-1"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Add Pin</span>
+              </button>
+            </div>
+
+            {!activeRun?.defect_pins || activeRun.defect_pins.length === 0 ? (
+              <div className="text-center py-8 text-xs text-[#94A3B8] space-y-2">
+                <Pin className="w-6 h-6 mx-auto text-[#CBD5E1]" />
+                <p>No defects marked on this recording yet.</p>
+                <p className="text-[11px] text-[#64748B]">Select an audio region to document a finding.</p>
+              </div>
+            ) : (
+              activeRun.defect_pins.map(pin => (
+                <div
+                  key={pin.id}
+                  onClick={() => setHighlightRegion([pin.timestamp_start_s, pin.timestamp_end_s])}
+                  className="p-3 bg-[#FAFBFD] border border-[#E7ECF3] rounded-lg space-y-1.5 hover:border-[#3867E8] cursor-pointer transition-colors"
+                >
                   <div className="flex items-center justify-between">
-                    <span className="font-mono text-sm font-bold text-[#8B5CF6]">{activeCapsule.id}</span>
-                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded uppercase font-bold border ${
+                    <span className="font-mono text-xs font-bold text-[#D94848]">
+                      P1 {pin.timestamp_start_s.toFixed(2)}s – {pin.timestamp_end_s.toFixed(2)}s
+                    </span>
+                    <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-[#FFF0F0] text-[#D94848]">
+                      {pin.severity}
+                    </span>
+                  </div>
+                  <p className="text-xs font-medium text-[#172033]">{pin.category.replace(/_/g, ' ')}</p>
+                  <p className="text-[11px] text-[#64748B]">{pin.note}</p>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Tab 3: Capsule Summary & Regression Runner */}
+        {rightTab === 'capsule' && (
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {activeCapsule ? (
+              <div className="space-y-4">
+                {/* Capsule Header Card */}
+                <div className="bg-[#FAFBFD] border border-[#E7ECF3] rounded-lg p-3.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-bold text-[#3867E8]">
+                      {activeCapsule.id}
+                    </span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                       activeCapsule.state === 'RESOLVED'
-                        ? 'bg-[#10B981]/15 text-[#10B981] border-[#10B981]/30'
-                        : 'bg-[#F59E0B]/15 text-[#F59E0B] border-[#F59E0B]/30'
+                        ? 'bg-[#EAF8F0] text-[#16A36A] border border-[#C6F0D8]'
+                        : 'bg-[#FFF0F0] text-[#D94848] border border-[#FDD8D8]'
                     }`}>
                       {activeCapsule.state}
                     </span>
                   </div>
 
-                  <div className="text-[11px] font-mono text-[#94A3B8] space-y-1">
-                    <div>Defect: <strong className="text-[#F3F4F6]">{activeCapsule.defect_type}</strong></div>
-                    <div className="flex items-center justify-between">
-                      <div className="truncate">Digest: <span className="text-[#64748B]">{activeCapsule.failing_audio_sha256.slice(0, 16)}...</span></div>
-                      <button
-                        onClick={handleValidateHash}
-                        className="px-2 py-0.5 rounded bg-[#080A0E] hover:bg-[#222938] text-[10px] text-[#4F8CFF] border border-[#4F8CFF]/30 transition-colors"
-                      >
-                        Verify Hash
-                      </button>
-                    </div>
-                    {hashStatus?.checked && (
-                      <div className={`p-1.5 rounded text-[10px] font-mono border ${
-                        hashStatus.valid ? 'bg-[#10B981]/15 text-[#10B981] border-[#10B981]/30' : 'bg-[#EF4444]/15 text-[#EF4444] border-[#EF4444]/30'
-                      }`}>
-                        {hashStatus.valid ? '✓ SHA-256 Verified (Matches audio file bytes on disk)' : '✗ Hash Mismatch or File Missing'}
-                      </div>
-                    )}
+                  <p className="text-xs font-semibold text-[#172033]">
+                    {activeCapsule.defect_type.replace(/_/g, ' ')}
+                  </p>
+
+                  <div className="text-[11px] font-mono text-[#64748B] truncate">
+                    SHA-256: {activeCapsule.failing_audio_sha256 || activeCapsule.audio_sha256}
                   </div>
 
-                  {/* Assertions Contract */}
-                  <div className="pt-2 border-t border-[#222938] space-y-1">
-                    <span className="text-[10px] font-mono text-[#64748B] uppercase">Regression Assertions</span>
-                    {activeCapsule.spec?.assertions?.map(a => (
-                      <div key={a.id} className="p-1.5 rounded bg-[#080A0E] text-[10px] font-mono text-[#94A3B8]">
-                        <span className="text-[#4F8CFF] font-bold">[{a.id}]</span> {a.description || a.type}
+                  {/* Hash Validation Button */}
+                  <div className="pt-1">
+                    <button
+                      onClick={() => handleVerifyCapsuleHash(activeCapsule.id)}
+                      disabled={verifyingHash}
+                      className="w-full py-1 text-[11px] font-medium rounded border border-[#E7ECF3] bg-white hover:bg-[#F8FAFC] text-[#3867E8] flex items-center justify-center gap-1 shadow-xs"
+                    >
+                      {verifyingHash ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck className="w-3 h-3" />}
+                      <span>Verify Byte Hash</span>
+                    </button>
+                    {integrityStatus && (
+                      <p className={`text-[10px] font-mono mt-1 ${
+                        integrityStatus.includes('VERIFIED') ? 'text-[#16A36A]' : 'text-[#D94848]'
+                      }`}>
+                        {integrityStatus}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Assertions Checklist */}
+                <div>
+                  <h4 className="text-[11px] font-bold uppercase tracking-wider text-[#64748B] mb-2">
+                    Deterministic Assertions ({activeCapsule.spec.assertions?.length || 0})
+                  </h4>
+                  <div className="space-y-1.5">
+                    {activeCapsule.spec.assertions?.map((a: any, i: number) => (
+                      <div key={i} className="p-2 rounded bg-white border border-[#E7ECF3] text-xs space-y-0.5">
+                        <div className="flex items-center justify-between font-mono text-[11px] text-[#3867E8]">
+                          <span>{a.id} • {a.type}</span>
+                          <span className="text-[#16A36A]">ACTIVE</span>
+                        </div>
+                        <p className="text-[11px] text-[#64748B]">{a.description}</p>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* Regression Replay CTA */}
-                <button
-                  onClick={handleRerunRegression}
-                  disabled={rerunningRegression}
-                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold rounded-lg bg-[#4F8CFF] hover:bg-[#3D78E6] disabled:opacity-50 text-white transition-all shadow-md"
-                >
-                  {rerunningRegression ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                  <span>Rerun Regression (Fixed Audio)</span>
-                </button>
-
-                {/* Regression Verdict & Table */}
-                {regressionRun && (
-                  <div className="bg-[#171C26] border border-[#222938] rounded-lg p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-xs font-bold text-[#F3F4F6]">Verdict</span>
-                      <span className={`text-[11px] font-mono px-2 py-0.5 rounded uppercase font-bold ${
-                        regressionRun.verdict === 'RESOLVED' ? 'bg-[#10B981] text-white' : 'bg-[#F59E0B] text-black'
-                      }`}>
-                        {regressionRun.verdict}
-                      </span>
-                    </div>
-
-                    <BeforeAfterTable
-                      assertions={regressionRun.assertion_results}
-                      verdict={regressionRun.verdict}
-                      onApprove={handleApproveRegression}
-                    />
-
-                    {regressionRun.verdict === 'NEEDS_REVIEW' && (
-                      <button
-                        onClick={handleApproveRegression}
-                        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded bg-[#10B981] hover:bg-[#059669] text-white transition-colors"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>Sign-off & Approve Regression</span>
-                      </button>
+                {/* Regression Actions */}
+                <div className="space-y-2 pt-2 border-t border-[#E7ECF3]">
+                  <button
+                    onClick={handleRerunRegression}
+                    disabled={rerunningRegression}
+                    className="w-full py-2 bg-[#3867E8] hover:bg-[#2C56CE] disabled:opacity-50 text-white font-medium text-xs rounded-lg shadow-sm flex items-center justify-center gap-1.5"
+                  >
+                    {rerunningRegression ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Evaluating Assertions...</span>
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Run Regression Test</span>
+                      </>
                     )}
-                  </div>
-                )}
+                  </button>
+
+                  {regressionRun && (
+                    <div className="p-3 rounded-lg bg-[#FAFBFD] border border-[#E7ECF3] space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#64748B]">Verdict:</span>
+                        <span className={`font-mono font-bold ${
+                          regressionRun.verdict === 'RESOLVED' ? 'text-[#16A36A]' : 'text-[#D99520]'
+                        }`}>
+                          {regressionRun.verdict}
+                        </span>
+                      </div>
+
+                      {regressionRun.verdict === 'NEEDS_REVIEW' && (
+                        <button
+                          onClick={handleApproveRegression}
+                          className="w-full py-1.5 bg-[#16A36A] hover:bg-[#128053] text-white font-medium rounded text-xs flex items-center justify-center gap-1 shadow-xs"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Approve Fix (Lead Sign-off)</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
-              <div className="py-8 text-center text-xs text-[#64748B]">
-                No capsule compiled for this run yet. Flag an anomaly or click "Compile Voice Defect Capsule" to create one.
+              <div className="text-center py-8 text-xs text-[#94A3B8] space-y-2">
+                <Layers className="w-6 h-6 mx-auto text-[#CBD5E1]" />
+                <p>No capsule compiled for this scenario yet.</p>
+                <p className="text-[11px] text-[#64748B]">Switch to Radar or Pins to compile evidence.</p>
               </div>
             )}
           </div>
         )}
-      </div>
-    </div>
+      </aside>
 
-    {/* =========================================================================
-        MODAL: CREATE NEW TEST SCENARIO
-        ========================================================================= */}
-    {showNewCaseModal && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-        <div
-          className="bg-[#11141B] border border-[#1D2230] rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl p-6 space-y-5"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Modal Header */}
-          <div className="flex items-center justify-between border-b border-[#1D2230] pb-4">
-            <div>
-              <h3 className="text-base font-bold text-[#F3F4F6] flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-[#4F8CFF]" />
-                <span>Create Indic Voice QA Scenario</span>
-              </h3>
-              <p className="text-xs text-[#94A3B8]">
-                Define expected ground-truth script, target Gnani speech engine, voice persona, and mandatory tokens.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowNewCaseModal(false)}
-              className="p-1.5 rounded-lg text-[#64748B] hover:text-white hover:bg-[#1D2230] transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+      {/* ============================================================== */}
+      {/* 4. MODALS & DRAWERS                                            */}
+      {/* ============================================================== */}
 
-          {/* Quick Presets Chips */}
-          <div className="bg-[#171C26] border border-[#222938] rounded-xl p-3 space-y-2">
-            <div className="text-[11px] font-mono text-[#94A3B8] flex items-center gap-1.5">
-              <Wand2 className="w-3.5 h-3.5 text-[#8B5CF6]" />
-              <span>Quick Presets (Click to autofill)</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => applyPreset('health')}
-                className="px-2.5 py-1 rounded bg-[#080A0E] hover:bg-[#222938] text-[11px] text-[#4F8CFF] border border-[#4F8CFF]/30 hover:border-[#4F8CFF] transition-colors"
-              >
-                🏥 Health Cashless Claim (Hindi)
-              </button>
-              <button
-                type="button"
-                onClick={() => applyPreset('motor')}
-                className="px-2.5 py-1 rounded bg-[#080A0E] hover:bg-[#222938] text-[11px] text-[#10B981] border border-[#10B981]/30 hover:border-[#10B981] transition-colors"
-              >
-                🚗 Motor NCB Renewal (Hinglish)
-              </button>
-              <button
-                type="button"
-                onClick={() => applyPreset('ivr')}
-                className="px-2.5 py-1 rounded bg-[#080A0E] hover:bg-[#222938] text-[11px] text-[#F59E0B] border border-[#F59E0B]/30 hover:border-[#F59E0B] transition-colors"
-              >
-                📞 8kHz Telephony Due Alert
-              </button>
-            </div>
-          </div>
+      {/* View Details Diagnostics Drawer */}
+      <AudioDetailsDrawer
+        isOpen={isDetailsDrawerOpen}
+        onClose={() => setIsDetailsDrawerOpen(false)}
+        run={activeRun}
+      />
 
-          {/* Form */}
-          <form onSubmit={handleCreateCase} className="space-y-4">
-            {/* Scenario Name */}
-            <div>
-              <label className="block text-xs font-mono text-[#94A3B8] mb-1.5">
-                Scenario Title <span className="text-[#EF4444]">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="e.g. Term Life Insurance Maturity Payout"
-                value={newScenario}
-                onChange={(e) => setNewScenario(e.target.value)}
-                className="w-full bg-[#080A0E] border border-[#222938] focus:border-[#4F8CFF] rounded-lg px-3 py-2 text-xs text-[#F3F4F6] placeholder-[#64748B] outline-none transition-colors"
-              />
-            </div>
+      {/* Add Defect Pin Modal */}
+      {showAddPinModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-xl max-w-sm w-full p-5 shadow-2xl border border-[#E7ECF3] space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <h3 className="text-sm font-bold text-[#172033] flex items-center gap-2">
+              <Pin className="w-4 h-4 text-[#D94848]" />
+              <span>Drop Defect Pin</span>
+            </h3>
 
-            {/* Language & Severity */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-xs font-mono text-[#94A3B8] mb-1.5">
-                  Language / Dialect <span className="text-[#EF4444]">*</span>
-                </label>
+                <label className="text-[11px] font-semibold text-[#64748B] block mb-1">Timecode (Seconds)</label>
+                <input
+                  type="number"
+                  step="0.05"
+                  value={pinTime}
+                  onChange={(e) => setPinTime(parseFloat(e.target.value))}
+                  className="w-full p-2 bg-[#F8FAFC] border border-[#E7ECF3] rounded text-[#172033] font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-semibold text-[#64748B] block mb-1">Defect Category</label>
                 <select
-                  value={newLanguage}
-                  onChange={(e) => setNewLanguage(e.target.value as any)}
-                  className="w-full bg-[#080A0E] border border-[#222938] focus:border-[#4F8CFF] rounded-lg px-3 py-2 text-xs text-[#F3F4F6] outline-none transition-colors"
+                  value={pinCategory}
+                  onChange={(e) => setPinCategory(e.target.value)}
+                  className="w-full p-2 bg-[#F8FAFC] border border-[#E7ECF3] rounded text-[#172033]"
                 >
-                  <option value="hi-IN">Hindi (hi-IN) - Devanagari</option>
-                  <option value="hinglish">Hinglish - Mixed Indian English</option>
+                  <option value="END_TRUNCATION">END_TRUNCATION</option>
+                  <option value="AMOUNT_MISPRONUNCIATION">AMOUNT_MISPRONUNCIATION</option>
+                  <option value="ACOUSTIC_CLIPPING">ACOUSTIC_CLIPPING</option>
+                  <option value="UNEXPECTED_SILENCE">UNEXPECTED_SILENCE</option>
+                  <option value="CODE_SWITCH_GLITCH">CODE_SWITCH_GLITCH</option>
+                  <option value="UNNATURAL_CADENCE">UNNATURAL_CADENCE</option>
+                  <option value="DATE_OR_NUMBER_DISTORTION">DATE_OR_NUMBER_DISTORTION</option>
+                  <option value="CRITICAL_PHRASE_MISSING">CRITICAL_PHRASE_MISSING</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-mono text-[#94A3B8] mb-1.5">
-                  Defect Severity Level <span className="text-[#EF4444]">*</span>
-                </label>
+                <label className="text-[11px] font-semibold text-[#64748B] block mb-1">Severity</label>
                 <select
-                  value={newSeverity}
-                  onChange={(e) => setNewSeverity(e.target.value as any)}
-                  className="w-full bg-[#080A0E] border border-[#222938] focus:border-[#4F8CFF] rounded-lg px-3 py-2 text-xs text-[#F3F4F6] outline-none transition-colors"
+                  value={pinSeverity}
+                  onChange={(e) => setPinSeverity(e.target.value)}
+                  className="w-full p-2 bg-[#F8FAFC] border border-[#E7ECF3] rounded text-[#172033]"
                 >
-                  <option value="CRITICAL">CRITICAL (Financial / Regulatory Truncation)</option>
-                  <option value="HIGH">HIGH (Amount or Policy Date Error)</option>
-                  <option value="MEDIUM">MEDIUM (Pronunciation or Unnatural Tone)</option>
-                  <option value="LOW">LOW (Minor Pause / Hesitation)</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Gnani Engine Model & Voice Persona */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-mono text-[#94A3B8] mb-1.5">
-                  Synthesis Model Engine <span className="text-[#EF4444]">*</span>
-                </label>
-                <select
-                  value={newTtsModel}
-                  onChange={(e) => {
-                    const mod = e.target.value as 'timbre-v3.0' | 'timbre-v2.5';
-                    setNewTtsModel(mod);
-                    setNewVoice(mod === 'timbre-v3.0' ? 'Shivani' : 'Nalini');
-                  }}
-                  className="w-full bg-[#080A0E] border border-[#222938] focus:border-[#4F8CFF] rounded-lg px-3 py-2 text-xs text-[#F3F4F6] outline-none transition-colors"
-                >
-                  <option value="timbre-v3.0">Timbre v3.0 (Indic-Expressive Sovereign)</option>
-                  <option value="timbre-v2.5">Timbre v2.5 (Telephony Baseline)</option>
+                  <option value="CRITICAL">CRITICAL</option>
+                  <option value="HIGH">HIGH</option>
+                  <option value="MEDIUM">MEDIUM</option>
+                  <option value="LOW">LOW</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-mono text-[#94A3B8] mb-1.5">
-                  Voice Persona <span className="text-[#EF4444]">*</span>
-                </label>
-                <select
-                  value={newVoice}
-                  onChange={(e) => setNewVoice(e.target.value)}
-                  className="w-full bg-[#080A0E] border border-[#222938] focus:border-[#4F8CFF] rounded-lg px-3 py-2 text-xs text-[#F3F4F6] outline-none transition-colors"
-                >
-                  {(newTtsModel === 'timbre-v3.0' ? V3_PERSONAS : V25_PERSONAS).map(p => (
-                    <option key={p.name} value={p.name}>
-                      {p.name} ({p.gender}) — {p.character}
-                    </option>
-                  ))}
-                </select>
+                <label className="text-[11px] font-semibold text-[#64748B] block mb-1">Reviewer Evidence Note</label>
+                <textarea
+                  rows={2}
+                  value={pinNote}
+                  onChange={(e) => setPinNote(e.target.value)}
+                  className="w-full p-2 bg-[#F8FAFC] border border-[#E7ECF3] rounded text-[#172033]"
+                />
               </div>
             </div>
 
-            {/* Channel Audio Format */}
-            <div>
-              <label className="block text-xs font-mono text-[#94A3B8] mb-1.5">
-                Audio Channel & Sample Rate
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                  newChannel === 'standard'
-                    ? 'bg-[#4F8CFF]/15 border-[#4F8CFF] text-[#F3F4F6]'
-                    : 'bg-[#080A0E] border-[#222938] text-[#94A3B8]'
-                }`}>
-                  <input
-                    type="radio"
-                    name="channel"
-                    value="standard"
-                    checked={newChannel === 'standard'}
-                    onChange={() => setNewChannel('standard')}
-                    className="text-[#4F8CFF]"
-                  />
-                  <div>
-                    <div className="text-xs font-medium">Standard Hi-Fi</div>
-                    <div className="text-[10px] text-[#64748B]">16kHz / 24kHz Studio Audio</div>
-                  </div>
-                </label>
-
-                <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                  newChannel === 'tel_8k'
-                    ? 'bg-[#4F8CFF]/15 border-[#4F8CFF] text-[#F3F4F6]'
-                    : 'bg-[#080A0E] border-[#222938] text-[#94A3B8]'
-                }`}>
-                  <input
-                    type="radio"
-                    name="channel"
-                    value="tel_8k"
-                    checked={newChannel === 'tel_8k'}
-                    onChange={() => setNewChannel('tel_8k')}
-                    className="text-[#4F8CFF]"
-                  />
-                  <div>
-                    <div className="text-xs font-medium">Telephony IVR</div>
-                    <div className="text-[10px] text-[#64748B]">8kHz μ-law / Bandpass</div>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            {/* Reference Spoken Text */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-mono text-[#94A3B8]">
-                  Reference Spoken Text <span className="text-[#EF4444]">*</span>
-                </label>
-                <span className="text-[10px] text-[#64748B] font-mono">Devanagari or Hinglish supported</span>
-              </div>
-              <textarea
-                required
-                rows={3}
-                placeholder="e.g. आपकी अगली किस्त ₹4,250 12 नवंबर तक देय है। लेट पेमेंट चार्ज ₹150 लागू हो सकता है।"
-                value={newReferenceText}
-                onChange={(e) => setNewReferenceText(e.target.value)}
-                className="w-full bg-[#080A0E] border border-[#222938] focus:border-[#4F8CFF] rounded-lg p-3 text-xs text-[#F3F4F6] placeholder-[#64748B] font-devanagari outline-none transition-colors"
-              />
-            </div>
-
-            {/* Critical Phrases */}
-            <div>
-              <label className="block text-xs font-mono text-[#94A3B8] mb-1.5">
-                Critical Phrases / Mandatory Tokens (comma-separated)
-              </label>
-              <input
-                type="text"
-                placeholder="₹4,250, 12 नवंबर, लेट फीस ₹150"
-                value={newCriticalPhrases}
-                onChange={(e) => setNewCriticalPhrases(e.target.value)}
-                className="w-full bg-[#080A0E] border border-[#222938] focus:border-[#4F8CFF] rounded-lg px-3 py-2 text-xs text-[#F3F4F6] placeholder-[#64748B] font-devanagari outline-none transition-colors"
-              />
-              <p className="mt-1 text-[10px] text-[#64748B]">
-                Dual-ASR Jury (Prisma v2.5 & v3.0) will cross-verify each token against synthesised audio.
-              </p>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#1D2230]">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E7ECF3]">
               <button
-                type="button"
-                onClick={() => setShowNewCaseModal(false)}
-                disabled={creatingCase}
-                className="px-4 py-2 text-xs font-medium text-[#94A3B8] hover:text-[#F3F4F6] transition-colors"
+                onClick={() => setShowAddPinModal(false)}
+                className="px-3 py-1.5 rounded text-xs text-[#64748B] hover:bg-[#F4F7FB]"
               >
                 Cancel
               </button>
-
               <button
-                type="submit"
-                disabled={creatingCase}
-                className="inline-flex items-center gap-2 px-5 py-2 text-xs font-bold rounded-lg bg-[#4F8CFF] hover:bg-[#3D78E6] disabled:opacity-50 text-white transition-all shadow-md"
+                onClick={handleAddPinSubmit}
+                className="px-4 py-1.5 rounded bg-[#3867E8] text-white text-xs font-semibold hover:bg-[#2C56CE]"
               >
-                {creatingCase ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                <span>{creatingCase ? 'Creating Scenario...' : 'Create Scenario'}</span>
+                Save Pin
               </button>
             </div>
-          </form>
+          </div>
         </div>
-      </div>
-    )}
-  </>
+      )}
+
+      {/* Create Scenario Modal */}
+      {showNewCaseModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl border border-[#E7ECF3] space-y-4">
+            <h3 className="text-sm font-bold text-[#172033]">Create Indic Test Scenario</h3>
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-[11px] font-semibold text-[#64748B] block mb-1">Scenario Title</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Health Cashless Claim Verification"
+                  value={newScenario}
+                  onChange={(e) => setNewScenario(e.target.value)}
+                  className="w-full p-2 bg-[#F8FAFC] border border-[#E7ECF3] rounded text-[#172033]"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-semibold text-[#64748B] block mb-1">Language</label>
+                  <select
+                    value={newLanguage}
+                    onChange={(e) => setNewLanguage(e.target.value as any)}
+                    className="w-full p-2 bg-[#F8FAFC] border border-[#E7ECF3] rounded text-[#172033]"
+                  >
+                    <option value="hi-IN">Hindi (hi-IN)</option>
+                    <option value="hinglish">Hinglish</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-[#64748B] block mb-1">Severity</label>
+                  <select
+                    value={newSeverity}
+                    onChange={(e) => setNewSeverity(e.target.value as any)}
+                    className="w-full p-2 bg-[#F8FAFC] border border-[#E7ECF3] rounded text-[#172033]"
+                  >
+                    <option value="HIGH">HIGH</option>
+                    <option value="CRITICAL">CRITICAL</option>
+                    <option value="MEDIUM">MEDIUM</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-[#64748B] block mb-1">Reference Ground Truth Script</label>
+                <textarea
+                  rows={3}
+                  placeholder="Enter Hindi/Hinglish reference text..."
+                  value={newReferenceText}
+                  onChange={(e) => setNewReferenceText(e.target.value)}
+                  className="w-full p-2 bg-[#F8FAFC] border border-[#E7ECF3] rounded text-[#172033] font-devanagari"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-[#64748B] block mb-1">Critical Entities (Comma-separated)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. ₹5,000, Apollo Hospital"
+                  value={newCriticalPhrases}
+                  onChange={(e) => setNewCriticalPhrases(e.target.value)}
+                  className="w-full p-2 bg-[#F8FAFC] border border-[#E7ECF3] rounded text-[#172033]"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#E7ECF3]">
+              <button
+                onClick={() => setShowNewCaseModal(false)}
+                className="px-3 py-1.5 rounded text-xs text-[#64748B] hover:bg-[#F4F7FB]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!newScenario || !newReferenceText) {
+                    alert('Please enter title and script.');
+                    return;
+                  }
+                  try {
+                    setCreatingCase(true);
+                    const phrases = newCriticalPhrases.split(',').map(s => ({
+                      text: s.trim(),
+                      variants: [s.trim()],
+                      severity: 'CRITICAL' as any
+                    })).filter(p => p.text);
+
+                    const created = await createTestCase({
+                      suite_id: 'suite-insurance-hi',
+                      scenario: newScenario,
+                      language: newLanguage,
+                      reference_text: newReferenceText,
+                      critical_phrases: phrases,
+                      tts_model: newTtsModel,
+                      voice: newVoice,
+                      severity: newSeverity,
+                      channel: 'standard'
+                    });
+                    await loadCases();
+                    setSelectedCaseId(created.id);
+                    setShowNewCaseModal(false);
+                  } catch (e) {
+                    alert(`Failed to create scenario: ${e}`);
+                  } finally {
+                    setCreatingCase(false);
+                  }
+                }}
+                disabled={creatingCase}
+                className="px-4 py-1.5 rounded bg-[#3867E8] text-white text-xs font-semibold hover:bg-[#2C56CE]"
+              >
+                {creatingCase ? 'Creating...' : 'Create Scenario'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
