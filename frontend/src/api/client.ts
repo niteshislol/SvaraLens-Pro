@@ -39,6 +39,18 @@ export async function createTestCase(data: Partial<TestCase>): Promise<TestCase>
   return res.json();
 }
 
+export async function importCasesCsv(file: File, suiteId: string = 'suite-insurance-hi'): Promise<{ imported: number; errors: string[] }> {
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('suite_id', suiteId);
+  const res = await fetch(`${API_BASE}/cases/import-csv`, {
+    method: 'POST',
+    body: fd
+  });
+  if (!res.ok) throw new Error('Failed to import CSV');
+  return res.json();
+}
+
 export async function triggerGenerateRun(caseId: string, injectedFault?: string): Promise<{ run_id: string; status: string; findings_count: number }> {
   let url = `${API_BASE}/cases/${caseId}/runs/generate`;
   if (injectedFault) url += `?injected_fault=${injectedFault}`;

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { TestCase } from '../types';
-import { fetchTestCases, fetchTestCase, triggerGenerateRun, uploadAudioRun, createTestCase } from '../api/client';
+import { fetchTestCases, fetchTestCase, triggerGenerateRun, uploadAudioRun, createTestCase, importCasesCsv } from '../api/client';
 import { StatusPill } from '../components/StatusPill';
 import {
   Play, Upload, Plus, AlertCircle, Sparkles, Layers,
@@ -17,6 +17,7 @@ export const TestCaseStudio: React.FC<TestCaseStudioProps> = ({ initialCaseId, o
   const [selectedCase, setSelectedCase] = useState<TestCase | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [csvUploading, setCsvUploading] = useState(false);
   const [injectFault, setInjectFault] = useState<string>('END_TRUNCATION');
   const [showNewModal, setShowNewModal] = useState(false);
 
@@ -76,6 +77,22 @@ export const TestCaseStudio: React.FC<TestCaseStudioProps> = ({ initialCaseId, o
     }
   };
 
+  const handleCsvImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setCsvUploading(true);
+      const res = await importCasesCsv(file, 'suite-insurance-hi');
+      alert(`Successfully imported ${res.imported} test case(s).${res.errors && res.errors.length > 0 ? ` Warnings/Errors: ${res.errors.join(', ')}` : ''}`);
+      await loadCases();
+    } catch (err) {
+      alert(`CSV import failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setCsvUploading(false);
+      e.target.value = '';
+    }
+  };
+
   const handleCreateCase = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -113,13 +130,23 @@ export const TestCaseStudio: React.FC<TestCaseStudioProps> = ({ initialCaseId, o
             <p className="text-[11px] text-[#9AA3B2]">Insurance Hindi Suite</p>
           </div>
 
-          <button
-            onClick={() => setShowNewModal(true)}
-            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-[#4F8CFF] hover:bg-[#3D78E6] text-white transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>New Case</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <label
+              title="Import CSV test cases"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded bg-[#0F1115] hover:bg-[#262B36] text-[#E6E8EE] border border-[#262B36] cursor-pointer transition-colors"
+            >
+              {csvUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5 text-[#9AA3B2]" />}
+              <span>Import CSV</span>
+              <input type="file" accept=".csv" onChange={handleCsvImport} disabled={csvUploading} className="hidden" />
+            </label>
+            <button
+              onClick={() => setShowNewModal(true)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-[#4F8CFF] hover:bg-[#3D78E6] text-white transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>New</span>
+            </button>
+          </div>
         </div>
 
         <div className="space-y-2 overflow-y-auto flex-1 pr-1">

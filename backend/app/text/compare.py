@@ -33,7 +33,7 @@ def compute_wer_cer(reference: str, transcript: str) -> Dict[str, Any]:
         "hyp_norm": hyp_norm
     }
 
-def match_single_phrase(phrase: str, variants: List[str], hyp_norm: str, min_ratio: float = 85.0) -> Tuple[bool, float, str]:
+def match_single_phrase(phrase: str, variants: List[str], hyp_norm: str, min_ratio: float = 80.0) -> Tuple[bool, float, str]:
     """
     Check exact normalised match, then variants, then rapidfuzz partial_ratio >= min_ratio.
     Returns: (is_matched, score, match_type)

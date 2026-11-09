@@ -1,0 +1,7 @@
+scenario,language,reference_text,critical_phrases,severity
+Term Life Plan Free-Look Cancellation,hi-IN,"यदि आप इस पॉलिसी से संतुष्ट नहीं हैं तो आप 15 दिनों की फ्री-लुक अवधि के भीतर इसे रद्द कर सकते हैं।",फ्री-लुक अवधि|15 दिन|रद्द,HIGH
+UPI Mandate Auto-Debit Failure,hinglish,"Aapka premium mandate ₹2,499 deduct nahi ho paya hai. Account me sufficient balance maintain karein.","₹2,499|mandate|sufficient balance",CRITICAL
+Critical Illness Rider Addition,hi-IN,"आपकी पॉलिसी में ₹5,00,000 का क्रिटिकल इलनेस राइडर जोड़ दिया गया है।","₹5,00,000|क्रिटिकल इलनेस राइडर",HIGH
+Hospital Cash Daily Benefit Claim,hinglish,"Aapka daily hospital cash benefit ₹1,500 per day sanction ho gaya hai. Reference id HC-9021 hai.","₹1,500|daily hospital cash|HC-9021",MEDIUM
+Home Insurance Fire Damage Claim,hi-IN,"आपके गृह बीमा दावे की स्वीकृति राशि ₹3,20,000 अगले तीन कार्य दिवसों में हस्तांतरित कर दी जाएगी।","₹3,20,000|गृह बीमा|तीन कार्य दिवस",CRITICAL
+Car Insurance No Claim Bonus Transfer,hinglish,Aapki purani policy ka 50% No Claim Bonus nayi car policy me successfully transfer ho gaya hai.,50% No Claim Bonus|transfer,HIGH

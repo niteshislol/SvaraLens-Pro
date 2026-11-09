@@ -53,6 +53,9 @@ def normalize_currency_and_numbers(text: str) -> str:
     # Normalize currency prefixes
     text = re.sub(r'(?:₹|rs\.?|rupees?|inr)\s*(\d+(?:,\d+)*(?:\.\d+)?)', r'\1', text, flags=re.IGNORECASE)
     
+    # Normalize currency suffixes (e.g. 150 रुपये, 150 रुपए, 150 rs)
+    text = re.sub(r'(\d+(?:,\d+)*(?:\.\d+)?)\s*(?:रुपये|रुपए|रुपया|rupees?|rs\.?)', r'\1', text, flags=re.IGNORECASE)
+    
     # Remove commas between digits e.g. 4,250 -> 4250
     text = re.sub(r'(?<=\d),(?=\d)', '', text)
     return text
@@ -115,6 +118,9 @@ def normalize_text_hindi(text: str) -> str:
 
     # Step 6: Dates
     text = normalize_dates(text)
+
+    # Step 6b: Standard Indic orthographic equivalence (anusvara vs panchama-varna)
+    text = text.replace('विलम्ब', 'विलंब').replace('सम्बन्ध', 'संबंध').replace('सम्पर्क', 'संपर्क')
 
     # Step 7: Punctuation
     text = strip_punctuation_except_numbers(text)

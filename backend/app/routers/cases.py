@@ -23,8 +23,11 @@ from ..capsule.compiler import compute_sha256
 router = APIRouter(prefix="/cases", tags=["cases"])
 
 def get_next_case_id(db: Session) -> str:
-    count = db.query(TestCase).count()
-    return f"TC-{count+1:03d}"
+    existing_ids = {c[0] for c in db.query(TestCase.id).all()}
+    i = 1
+    while f"TC-{i:03d}" in existing_ids:
+        i += 1
+    return f"TC-{i:03d}"
 
 @router.get("", response_model=List[TestCaseRead])
 def list_test_cases(suite_id: Optional[str] = None, db: Session = Depends(get_db)):
@@ -214,6 +217,7 @@ async def import_cases_csv(
             db.commit()
             created += 1
         except Exception as e:
+            db.rollback()
             errors.append(f"Row {idx}: {str(e)}")
 
     return {"imported": created, "errors": errors}

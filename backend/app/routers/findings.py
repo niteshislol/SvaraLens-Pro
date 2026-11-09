@@ -10,8 +10,11 @@ from ..capsule.compiler import compile_defect_capsule
 router = APIRouter(prefix="/findings", tags=["findings"])
 
 def get_next_capsule_id(db: Session) -> str:
-    count = db.query(Capsule).count()
-    return f"SL-{count+1:03d}"
+    existing_ids = {c[0] for c in db.query(Capsule.id).all()}
+    i = 1
+    while f"SL-{i:03d}" in existing_ids:
+        i += 1
+    return f"SL-{i:03d}"
 
 @router.patch("/{id}", response_model=FindingRead)
 def update_finding(id: str, update_in: FindingUpdate, db: Session = Depends(get_db)):
