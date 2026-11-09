@@ -1,36 +1,23 @@
 import React, { useEffect, useState } from 'react';
-import { fetchHealth, fetchTestCases, fetchCapsules } from './api/client';
-import { Health, TestCase, Capsule } from './types';
-import { Sidebar, NavView } from './components/Sidebar';
-import { TopNavbar } from './components/TopNavbar';
-import { CommandPalette } from './components/CommandPalette';
+import { fetchHealth, fetchTestCases } from './api/client';
+import { Health, TestCase } from './types';
+import { ProWorkbench } from './pages/ProWorkbench';
 import { SuiteDashboard } from './pages/SuiteDashboard';
-import { TestCaseStudio } from './pages/TestCaseStudio';
-import { RunAnalysis } from './pages/RunAnalysis';
-import { ReviewStudio } from './pages/ReviewStudio';
 import { CapsuleView } from './pages/CapsuleView';
-import { MultiModelArena } from './pages/MultiModelArena';
-import { BenchmarkMatrix } from './pages/BenchmarkMatrix';
-import { AlertTriangle } from 'lucide-react';
+import { CommandPalette } from './components/CommandPalette';
+import {
+  Layers, Headphones, FileBox, LayoutDashboard, ShieldCheck,
+  AlertTriangle, Volume2, Sparkles, Activity, Search, Download,
+  Radio, Zap
+} from 'lucide-react';
 
 export function App() {
-  const [currentView, setCurrentView] = useState<NavView>('arena');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-
-  // Global settings state
-  const [channel, setChannel] = useState<string>('pstn_8k');
-  const [selectedModel, setSelectedModel] = useState<string>('prisma-v2.5');
-
-  // Active items
-  const [activeCaseId, setActiveCaseId] = useState<string | undefined>('TC-014');
-  const [activeRunId, setActiveRunId] = useState<string | undefined>();
+  const [currentView, setCurrentView] = useState<'workbench' | 'dashboard' | 'capsules'>('workbench');
+  const [activeCaseId, setActiveCaseId] = useState<string>('TC-014');
   const [activeCapsuleId, setActiveCapsuleId] = useState<string | undefined>();
-
-  // Global data caches
   const [health, setHealth] = useState<Health | null>(null);
   const [cases, setCases] = useState<TestCase[]>([]);
-  const [capsules, setCapsules] = useState<Capsule[]>([]);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
   useEffect(() => {
     fetchHealth()
@@ -39,167 +26,182 @@ export function App() {
 
     fetchTestCases('suite-insurance-hi')
       .then(setCases)
-      .catch(console.error);
-
-    fetchCapsules()
-      .then(setCapsules)
-      .catch(console.error);
+      .catch(() => {});
   }, []);
 
-  const openCapsulesCount = capsules.filter(c => c.state === 'OPEN').length;
+  const handleExportHtml = () => {
+    window.open('/api/exports/report/suite-insurance-hi.html', '_blank');
+  };
 
   return (
-    <div className="h-screen w-screen bg-[#0A0C10] text-[#E6E8EE] flex overflow-hidden font-sans selection:bg-[#4F8CFF] selection:text-white">
-      {/* Universal Command Palette (Cmd+K) */}
-      <CommandPalette
-        isOpen={commandPaletteOpen}
-        onClose={() => setCommandPaletteOpen(false)}
-        onNavigate={(view, id) => {
-          setCurrentView(view);
-          if (view === 'cases' && id) setActiveCaseId(id);
-          if (view === 'capsules' && id) setActiveCapsuleId(id);
-        }}
-        cases={cases}
-        capsules={capsules}
-      />
-
-      {/* Left Sidebar Rail */}
-      <Sidebar
-        currentView={currentView}
-        onNavigate={(view) => setCurrentView(view)}
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        activeRunId={activeRunId}
-        openCapsulesCount={openCapsulesCount}
-        totalCasesCount={cases.length}
-      />
-
-      {/* Main Workspace Column */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#0A0C10]">
-        {/* Top Navbar */}
-        <TopNavbar
-          currentView={currentView}
-          activeCaseId={activeCaseId}
-          channel={channel}
-          onChangeChannel={setChannel}
-          selectedModel={selectedModel}
-          onChangeModel={setSelectedModel}
-          onOpenCommandPalette={() => setCommandPaletteOpen(true)}
-          health={health}
-        />
-
-        {/* Mock Mode Banner if Active */}
-        {health?.mock_mode && (
-          <div className="bg-[#F5A524]/10 border-b border-[#F5A524]/30 px-4 py-1 text-xs font-mono text-[#F5A524] flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-              <span>
-                <strong>MOCK FIXTURES MODE:</strong> Using deterministic Indic test audio. Set GNANI_API_KEY in .env for live platform endpoints.
-              </span>
-            </div>
-            <span className="text-[10px] opacity-75 hidden sm:inline">v2.0 • Workbench Active</span>
+    <div className="min-h-screen bg-[#080A0E] text-[#F3F4F6] flex flex-col font-sans selection:bg-[#4F8CFF] selection:text-white">
+      {/* Persistent Mock Mode Warning Banner */}
+      {health?.mock_mode && (
+        <div className="bg-[#F5A524]/10 border-b border-[#F5A524]/30 px-4 py-1.5 text-xs font-mono text-[#F5A524] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>
+              <strong>MOCK MODE:</strong> Running on deterministic Indic fixtures. Set GNANI_API_KEY in .env for live Vachana platform synthesis.
+            </span>
           </div>
+          <span className="text-[11px] opacity-80">v0.2.0 • Pro Workbench</span>
+        </div>
+      )}
+
+      {/* Top Navigation & Command Bar (56px) */}
+      <header className="bg-[#10131B] border-b border-[#1D2230] sticky top-0 z-40 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+          {/* Logo & Platform Tagline */}
+          <div className="flex items-center gap-3">
+            <div
+              onClick={() => setCurrentView('workbench')}
+              className="flex items-center gap-2.5 cursor-pointer group"
+            >
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#4F8CFF] to-[#8B5CF6] flex items-center justify-center font-bold text-white shadow-md group-hover:scale-105 transition-transform">
+                <Volume2 className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-base tracking-tight text-[#F3F4F6]">
+                    Svara<span className="text-[#4F8CFF]">Lens</span>
+                  </span>
+                  <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-[#8B5CF6]/20 text-[#8B5CF6] border border-[#8B5CF6]/40">
+                    PRO
+                  </span>
+                </div>
+                <span className="hidden xl:inline text-[10px] font-mono text-[#64748B]">
+                  Indic Voice QA & Model Intelligence Workbench
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Center Search / Command Trigger */}
+          <div
+            onClick={() => setIsCommandPaletteOpen(true)}
+            className="hidden md:flex items-center gap-2 bg-[#171C26] hover:bg-[#212836] border border-[#222938] hover:border-[#4F8CFF]/50 px-3 py-1.5 rounded-lg text-xs text-[#64748B] hover:text-[#94A3B8] cursor-pointer transition-colors max-w-sm w-full"
+          >
+            <Search className="w-3.5 h-3.5 text-[#4F8CFF]" />
+            <span className="flex-1 text-left">Search scenarios, models, or actions...</span>
+            <kbd className="px-1.5 py-0.5 rounded bg-[#080A0E] text-[10px] font-mono border border-[#222938]">
+              ⌘K
+            </kbd>
+          </div>
+
+          {/* Right Navigation & Actions */}
+          <div className="flex items-center gap-2">
+            {/* Live Indicator */}
+            <div className="hidden sm:flex items-center gap-1.5 bg-[#171C26] border border-[#222938] px-2.5 py-1 rounded-lg text-[11px] font-mono text-[#94A3B8]">
+              <span className={`w-2 h-2 rounded-full ${health?.mock_mode ? 'bg-[#F59E0B]' : 'bg-[#10B981] animate-pulse'}`} />
+              <span>{health?.mock_mode ? 'Mock Mode' : 'Gnani Live'}</span>
+            </div>
+
+            {/* View Tabs */}
+            <nav className="flex items-center bg-[#171C26] p-0.5 rounded-lg border border-[#222938] text-xs font-medium">
+              <button
+                onClick={() => setCurrentView('workbench')}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition-all ${
+                  currentView === 'workbench'
+                    ? 'bg-[#4F8CFF] text-white font-bold shadow-sm'
+                    : 'text-[#94A3B8] hover:text-white'
+                }`}
+              >
+                <Activity className="w-3.5 h-3.5" />
+                <span>Workbench</span>
+              </button>
+
+              <button
+                onClick={() => setCurrentView('dashboard')}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition-all ${
+                  currentView === 'dashboard'
+                    ? 'bg-[#4F8CFF] text-white font-bold shadow-sm'
+                    : 'text-[#94A3B8] hover:text-white'
+                }`}
+              >
+                <LayoutDashboard className="w-3.5 h-3.5" />
+                <span>Suite</span>
+              </button>
+
+              <button
+                onClick={() => setCurrentView('capsules')}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition-all ${
+                  currentView === 'capsules'
+                    ? 'bg-[#4F8CFF] text-white font-bold shadow-sm'
+                    : 'text-[#94A3B8] hover:text-white'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Capsules</span>
+              </button>
+            </nav>
+
+            {/* Export HTML Report Pill */}
+            <button
+              onClick={handleExportHtml}
+              title="Download Release Readiness Report"
+              className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#10B981]/15 hover:bg-[#10B981]/25 text-[#10B981] border border-[#10B981]/30 transition-colors"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Report</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Viewport */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-5">
+        {currentView === 'workbench' && (
+          <ProWorkbench
+            initialCaseId={activeCaseId}
+            onOpenReport={handleExportHtml}
+          />
         )}
 
-        {/* Scrollable Main Workspace View */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-7 max-w-7xl w-full mx-auto">
-          {currentView === 'arena' && (
-            <MultiModelArena
-              onNavigateToReview={(runId) => {
-                setActiveRunId(runId);
-                setCurrentView('review');
-              }}
-              onNavigateToCapsule={(capId) => {
-                setActiveCapsuleId(capId);
-                setCurrentView('capsules');
-              }}
-            />
-          )}
+        {currentView === 'dashboard' && (
+          <SuiteDashboard
+            onNavigate={(view, id) => {
+              if (id) setActiveCaseId(id);
+              if (view === 'cases') setCurrentView('workbench');
+              else if (view === 'capsules') setCurrentView('capsules');
+            }}
+          />
+        )}
 
-          {currentView === 'benchmarks' && (
-            <BenchmarkMatrix />
-          )}
+        {currentView === 'capsules' && (
+          <CapsuleView
+            initialCapsuleId={activeCapsuleId}
+            onBack={() => setCurrentView('workbench')}
+          />
+        )}
+      </main>
 
-          {currentView === 'dashboard' && (
-            <SuiteDashboard
-              onNavigate={(view, id) => {
-                if (view === 'cases') {
-                  if (id) setActiveCaseId(id);
-                  setCurrentView('cases');
-                } else if (view === 'capsules') {
-                  if (id) setActiveCapsuleId(id);
-                  setCurrentView('capsules');
-                } else if (view === 'arena') {
-                  setCurrentView('arena');
-                } else if (view === 'benchmarks') {
-                  setCurrentView('benchmarks');
-                }
-              }}
-            />
-          )}
+      {/* Global Command Palette (Cmd + K) */}
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        cases={cases}
+        onSelectCase={(id) => {
+          setActiveCaseId(id);
+          setCurrentView('workbench');
+        }}
+        onExportReport={handleExportHtml}
+      />
 
-          {currentView === 'cases' && (
-            <TestCaseStudio
-              initialCaseId={activeCaseId}
-              onNavigateToRun={(runId) => {
-                setActiveRunId(runId);
-                setCurrentView('run');
-              }}
-            />
-          )}
-
-          {currentView === 'run' && activeRunId && (
-            <RunAnalysis
-              runId={activeRunId}
-              onNavigateToReview={(runId) => {
-                setActiveRunId(runId);
-                setCurrentView('review');
-              }}
-              onNavigateToCapsule={(capsuleId) => {
-                setActiveCapsuleId(capsuleId);
-                setCurrentView('capsules');
-              }}
-              onBack={() => setCurrentView('cases')}
-            />
-          )}
-
-          {currentView === 'review' && activeRunId && (
-            <ReviewStudio
-              runId={activeRunId}
-              onNavigateToRun={(runId) => {
-                setActiveRunId(runId);
-                setCurrentView('run');
-              }}
-              onNavigateToCapsule={(capsuleId) => {
-                setActiveCapsuleId(capsuleId);
-                setCurrentView('capsules');
-              }}
-            />
-          )}
-
-          {currentView === 'capsules' && (
-            <CapsuleView
-              initialCapsuleId={activeCapsuleId}
-              onBack={() => setCurrentView('dashboard')}
-            />
-          )}
-        </main>
-
-        {/* Global Workbench Status Footer */}
-        <footer className="h-8 border-t border-[#262B36] bg-[#12151C] px-4 flex items-center justify-between text-[11px] font-mono text-[#9AA3B2] shrink-0">
-          <div className="flex items-center gap-3">
-            <span className="font-semibold text-[#E6E8EE]">SvaraLens v2.0 Workbench</span>
-            <span className="hidden sm:inline text-[#262B36]">|</span>
-            <span className="hidden sm:inline">NIST Aggregate WER Metric</span>
-            <span className="hidden sm:inline text-[#262B36]">|</span>
-            <span className="hidden sm:inline">G.711 Telephony DSP Active</span>
-          </div>
-
+      {/* Subtle Pro Footer */}
+      <footer className="border-t border-[#1D2230] bg-[#10131B] py-2.5 text-xs font-mono text-[#64748B]">
+        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-[#4F8CFF]">Press ⌘K for search</span>
+            <span className="text-[#F3F4F6] font-bold">SvaraLens Pro</span>
+            <span>•</span>
+            <span>Gnani Timbre v3.0 & Prisma v3.0</span>
           </div>
-        </footer>
-      </div>
+          <div className="flex items-center gap-3">
+            <span>Press <kbd className="px-1 rounded bg-[#171C26] text-[#94A3B8]">Space</kbd> to Play</span>
+            <span>•</span>
+            <span className="text-[#4F8CFF]">10 Nov 2026</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

@@ -53,7 +53,8 @@ class MockGnaniClient(GnaniClientProtocol):
         voice: Optional[str] = None,
         speed: float = 1.0,
         case_id: Optional[str] = None,
-        injected_fault: Optional[str] = None
+        injected_fault: Optional[str] = None,
+        model: Optional[str] = None
     ) -> bytes:
         if injected_fault == "END_TRUNCATION":
             return self._generate_synthetic_tone(duration_s=4.2, abrupt_cutoff=True)
@@ -66,13 +67,14 @@ class MockGnaniClient(GnaniClientProtocol):
         language: str = "hi-IN",
         case_id: Optional[str] = None,
         reference_text: Optional[str] = None,
-        is_truncated: bool = False
+        is_truncated: bool = False,
+        model: Optional[str] = None
     ) -> TranscriptResult:
         if is_truncated:
             transcript = "आपका अगला प्रीमियम भुगतान 4,250 रुपये 12 नवंबर को देय है"
             raw = {
                 "transcript": transcript,
-                "model": "prisma-v2.5-mock",
+                "model": model or "prisma-v3.0-mock",
                 "language": language,
                 "duration": 4.2,
                 "words": []
@@ -82,7 +84,7 @@ class MockGnaniClient(GnaniClientProtocol):
             transcript = ref.replace("₹", "").strip()
             raw = {
                 "transcript": transcript,
-                "model": "prisma-v2.5-mock",
+                "model": model or "prisma-v3.0-mock",
                 "language": language,
                 "duration": 5.8,
                 "words": []
@@ -93,8 +95,37 @@ class MockGnaniClient(GnaniClientProtocol):
             words=raw.get("words", []),
             duration_s=raw.get("duration", 5.0),
             raw_json=raw,
-            request_id="mock-req-001"
+            request_id="mock-req-001",
+            detected_language="hi-IN",
+            latency_s=0.23
         )
+
+    async def transcribe_dual_asr(
+        self,
+        audio_path: str,
+        language: str = "hi-IN"
+    ) -> Dict[str, Any]:
+        t_res = await self.transcribe(audio_path, language=language)
+        return {
+            "primary_result": t_res,
+            "primary_text": t_res.text,
+            "prisma_v25": {
+                "model": "prisma-v2.5",
+                "text": t_res.text,
+                "duration_s": t_res.duration_s,
+                "request_id": "mock-v25"
+            },
+            "prisma_v30": {
+                "model": "prisma-v3.0",
+                "text": t_res.text,
+                "duration_s": t_res.duration_s,
+                "request_id": "mock-v30",
+                "detected_language": "hi-IN",
+                "latency_ms": 235.0
+            },
+            "consensus_score": 100.0,
+            "both_agree": True
+        }
 
 def get_gnani_client() -> GnaniClientProtocol:
     """Returns Live client if MOCK_MODE is False and API key is present, else Mock client."""

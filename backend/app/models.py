@@ -27,7 +27,8 @@ class TestCase(Base):
     language = Column(String, nullable=False)  # 'hi-IN' or 'hinglish'
     reference_text = Column(Text, nullable=False)
     critical_phrases_json = Column(Text, nullable=False)  # JSON list of [{text, variants[], severity}]
-    voice = Column(String, nullable=True)
+    voice = Column(String, default="Shivani", nullable=True)
+    tts_model = Column(String, default="timbre-v3.0", nullable=True)
     speed = Column(Float, default=1.0, nullable=False)
     channel = Column(String, default="standard", nullable=False)  # 'standard' or 'tel_8k'
     pace_min = Column(Float, default=1.8, nullable=False)
@@ -63,6 +64,10 @@ class Run(Base):
     transcript_words_json = Column(Text, nullable=True)
     stt_raw_json = Column(Text, nullable=True)
     tts_request_json = Column(Text, nullable=True)
+    tts_model = Column(String, default="timbre-v3.0", nullable=True)
+    tts_voice = Column(String, default="Shivani", nullable=True)
+    stt_dual_results_json = Column(Text, nullable=True)  # stores {prisma_v25, prisma_v30, consensus_score}
+    defect_pins_json = Column(Text, nullable=True)  # stores [{id, timestamp_start_s, timestamp_end_s, category, severity, note}]
     metrics_json = Column(Text, nullable=True)  # wer, cer, pace, peak_db, clip_ratio
     injected_fault = Column(Text, nullable=True)  # null unless deliberately injected
     error = Column(Text, nullable=True)
@@ -137,6 +142,7 @@ class Capsule(Base):
     review_status = Column(String, default="HUMAN_CONFIRMED", nullable=False)
     failing_audio_sha256 = Column(Text, nullable=False)
     spec_json = Column(Text, nullable=False)  # Full regression spec, immutable
+    defect_pins_json = Column(Text, nullable=True)  # Reviewer pinned defect timestamps
     state = Column(String, default="OPEN", nullable=False)  # 'OPEN', 'RESOLVED', 'REOPENED'
     created_at = Column(String, default=utcnow_iso, nullable=False)
 

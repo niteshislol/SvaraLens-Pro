@@ -8,6 +8,22 @@ class CriticalPhrase(BaseModel):
     variants: List[str] = Field(default_factory=list)
     severity: str = "HIGH"
 
+class DefectPin(BaseModel):
+    id: str
+    timestamp_start_s: float
+    timestamp_end_s: float
+    category: str  # 'END_TRUNCATION', 'PRONUNCIATION', 'CODE_SWITCH_GLITCH', 'PROSODY_PAUSE', 'CLIPPING', 'OTHER'
+    severity: str  # 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'
+    note: str
+    created_at: str
+
+class DefectPinCreate(BaseModel):
+    timestamp_start_s: float
+    timestamp_end_s: float
+    category: str
+    severity: str = "HIGH"
+    note: str
+
 # --- Suite ---
 
 class SuiteBase(BaseModel):
@@ -29,7 +45,8 @@ class TestCaseBase(BaseModel):
     language: str  # 'hi-IN' | 'hinglish'
     reference_text: str
     critical_phrases: List[CriticalPhrase]
-    voice: Optional[str] = "ananya"
+    voice: Optional[str] = "Shivani"
+    tts_model: Optional[str] = "timbre-v3.0"
     speed: float = 1.0
     channel: str = "standard"  # 'standard' | 'tel_8k'
     pace_min: float = 1.8
@@ -47,6 +64,7 @@ class TestCaseUpdate(BaseModel):
     reference_text: Optional[str] = None
     critical_phrases: Optional[List[CriticalPhrase]] = None
     voice: Optional[str] = None
+    tts_model: Optional[str] = None
     speed: Optional[float] = None
     channel: Optional[str] = None
     pace_min: Optional[float] = None
@@ -144,8 +162,12 @@ class RunRead(BaseModel):
     duration_s: Optional[float] = None
     sample_rate: Optional[int] = None
     channels: Optional[int] = None
+    tts_model: Optional[str] = "timbre-v3.0"
+    tts_voice: Optional[str] = "Shivani"
     transcript_text: Optional[str] = None
     transcript_words: Optional[List[Dict[str, Any]]] = None
+    stt_dual_results: Optional[Dict[str, Any]] = None
+    defect_pins: List[DefectPin] = Field(default_factory=list)
     metrics: Optional[Dict[str, Any]] = None
     injected_fault: Optional[str] = None
     error: Optional[str] = None

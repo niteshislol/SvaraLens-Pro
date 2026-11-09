@@ -133,20 +133,13 @@ async def rerun_capsule_regression(
     new_audio_sha256 = compute_sha256(str(norm_wav))
     acoustic_data = analyze_audio_file(str(norm_wav))
 
-    # Transcribe replacement audio
+    # Transcribe replacement audio with Dual-ASR Jury
     try:
-        import inspect
-        sig = inspect.signature(gnani_client.transcribe)
-        if "is_truncated" in sig.parameters:
-            stt_res = await gnani_client.transcribe(
-                audio_path=str(norm_wav),
-                language=test_case.language,
-                case_id=test_case.id,
-                reference_text=test_case.reference_text,
-                is_truncated=False  # Correction is NOT truncated!
-            )
-        else:
-            stt_res = await gnani_client.transcribe(audio_path=str(norm_wav), language=test_case.language)
+        dual_asr = await gnani_client.transcribe_dual_asr(
+            audio_path=str(norm_wav),
+            language=test_case.language
+        )
+        stt_res = dual_asr["primary_result"]
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Transcription failed: {str(e)}")
 
@@ -172,9 +165,17 @@ async def rerun_capsule_regression(
         duration_s=acoustic_data.get("duration_s", 0.0),
         sample_rate=16000,
         channels=1,
+        tts_model="timbre-v3.0",
+        tts_voice="Shivani",
         transcript_text=stt_res.text,
         transcript_words_json=json.dumps(stt_res.words, ensure_ascii=False),
         stt_raw_json=json.dumps(stt_res.raw_json, ensure_ascii=False),
+        stt_dual_results_json=json.dumps({
+            "prisma_v25": dual_asr.get("prisma_v25"),
+            "prisma_v30": dual_asr.get("prisma_v30"),
+            "consensus_score": dual_asr.get("consensus_score", 100.0),
+            "both_agree": dual_asr.get("both_agree", True)
+        }, ensure_ascii=False),
         metrics_json=json.dumps(check_results["metrics"], ensure_ascii=False)
     )
     db.add(db_new_run)

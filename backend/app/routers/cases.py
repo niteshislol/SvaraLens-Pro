@@ -46,7 +46,8 @@ def list_test_cases(suite_id: Optional[str] = None, db: Session = Depends(get_db
             language=c.language,
             reference_text=c.reference_text,
             critical_phrases=critical_phrases,
-            voice=c.voice,
+            voice=c.voice or "Shivani",
+            tts_model=getattr(c, "tts_model", "timbre-v3.0") or "timbre-v3.0",
             speed=c.speed,
             channel=c.channel,
             pace_min=c.pace_min,
@@ -110,7 +111,8 @@ def create_test_case(case_in: TestCaseCreate, db: Session = Depends(get_db)):
         language=db_case.language,
         reference_text=db_case.reference_text,
         critical_phrases=critical_phrases,
-        voice=db_case.voice,
+        voice=db_case.voice or "Shivani",
+        tts_model=getattr(db_case, "tts_model", "timbre-v3.0") or "timbre-v3.0",
         speed=db_case.speed,
         channel=db_case.channel,
         pace_min=db_case.pace_min,
@@ -134,7 +136,8 @@ def get_test_case(id: str, db: Session = Depends(get_db)):
         language=c.language,
         reference_text=c.reference_text,
         critical_phrases=critical_phrases,
-        voice=c.voice,
+        voice=c.voice or "Shivani",
+        tts_model=getattr(c, "tts_model", "timbre-v3.0") or "timbre-v3.0",
         speed=c.speed,
         channel=c.channel,
         pace_min=c.pace_min,
@@ -225,14 +228,16 @@ async def import_cases_csv(
 @router.post("/{id}/runs/generate")
 async def generate_and_analyze(
     id: str,
+    tts_model: Optional[str] = Query(None, description="Model: timbre-v3.0 or timbre-v2.5"),
+    tts_voice: Optional[str] = Query(None, description="Voice: Shivani, Avinash, Nalini, Deepak, etc."),
     injected_fault: Optional[str] = Query(None, description="Optional fault to inject: END_TRUNCATION, CLIPPING, SILENCE"),
     db: Session = Depends(get_db)
 ):
     """
-    Step 1: Calls Timbre v2.5 to synthesize speech.
-    Step 2: Saves audio to storage/audio.
-    Step 3: Calls Prisma v2.5 to transcribe audio.
-    Step 4: Executes the 6 checks and persists findings and metrics.
+    Step 1: Calls Gnani Timbre (v3.0 or v2.5) to synthesize speech.
+    Step 2: Saves audio to storage/audio and normalizes to standard 16kHz WAV.
+    Step 3: Calls Dual-ASR Jury (Prisma v2.5 + Prisma v3.0 in parallel) to transcribe audio.
+    Step 4: Executes 6 checks and persists findings, telemetry, and consensus.
     """
     c = db.query(TestCase).filter(TestCase.id == id).first()
     if not c:
@@ -242,31 +247,22 @@ async def generate_and_analyze(
     run_id = f"RUN-{uuid.uuid4().hex[:8].upper()}"
     source = "MOCK_FIXTURE" if settings.MOCK_MODE or not settings.GNANI_API_KEY else "TIMBRE_LIVE"
 
+    model_name = tts_model or getattr(c, "tts_model", None) or "timbre-v3.0"
+    voice_name = tts_voice or c.voice or ("Shivani" if model_name == "timbre-v3.0" else "Nalini")
+
     # 1. Synthesize audio
     try:
-        if hasattr(gnani_client, "synthesize"):
-            import inspect
-            sig = inspect.signature(gnani_client.synthesize)
-            if "case_id" in sig.parameters:
-                audio_bytes = await gnani_client.synthesize(
-                    text=c.reference_text,
-                    language=c.language,
-                    voice=c.voice,
-                    speed=c.speed,
-                    case_id=c.id,
-                    injected_fault=injected_fault
-                )
-            else:
-                audio_bytes = await gnani_client.synthesize(
-                    text=c.reference_text,
-                    language=c.language,
-                    voice=c.voice,
-                    speed=c.speed
-                )
-        else:
-            raise RuntimeError("Gnani client does not support synthesize")
+        audio_bytes = await gnani_client.synthesize(
+            text=c.reference_text,
+            language=c.language,
+            voice=voice_name,
+            speed=c.speed,
+            case_id=c.id,
+            injected_fault=injected_fault,
+            model=model_name
+        )
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Timbre synthesis failed: {str(e)}")
+        raise HTTPException(status_code=502, detail=f"Timbre ({model_name}) synthesis failed: {str(e)}")
 
     # 2. Save raw audio
     temp_wav = settings.AUDIO_STORE_PATH / f"{run_id}_raw.wav"
@@ -282,27 +278,17 @@ async def generate_and_analyze(
     # 3. Acoustic Analysis
     acoustic_data = analyze_audio_file(str(norm_wav))
 
-    # 4. Transcribe with Prisma
+    # 4. Transcribe with Dual-ASR Jury (Prisma v2.5 + Prisma v3.0)
     try:
-        import inspect
-        sig = inspect.signature(gnani_client.transcribe)
-        if "case_id" in sig.parameters:
-            stt_res = await gnani_client.transcribe(
-                audio_path=str(norm_wav),
-                language=c.language,
-                case_id=c.id,
-                reference_text=c.reference_text,
-                is_truncated=(injected_fault == "END_TRUNCATION" or (c.id == "TC-014" and injected_fault != "FIXED"))
-            )
-        else:
-            stt_res = await gnani_client.transcribe(
-                audio_path=str(norm_wav),
-                language=c.language
-            )
+        dual_asr = await gnani_client.transcribe_dual_asr(
+            audio_path=str(norm_wav),
+            language=c.language
+        )
+        stt_res = dual_asr["primary_result"]
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Prisma transcription failed: {str(e)}")
 
-    # 5. Execute 6 checks
+    # 5. Execute 6 checks on primary transcript
     critical_phrases = json.loads(c.critical_phrases_json) if c.critical_phrases_json else []
     check_results = run_all_checks(
         reference_text=c.reference_text,
@@ -313,7 +299,7 @@ async def generate_and_analyze(
         pace_max=c.pace_max
     )
 
-    # 6. Persist Run and Findings
+    # 6. Persist Run, Dual-ASR Telemetry, and Findings
     db_run = Run(
         id=run_id,
         case_id=c.id,
@@ -324,10 +310,18 @@ async def generate_and_analyze(
         duration_s=acoustic_data.get("duration_s", duration_s),
         sample_rate=16000,
         channels=1,
+        tts_model=model_name,
+        tts_voice=voice_name,
         transcript_text=stt_res.text,
         transcript_words_json=json.dumps(stt_res.words, ensure_ascii=False),
         stt_raw_json=json.dumps(stt_res.raw_json, ensure_ascii=False),
-        tts_request_json=json.dumps({"voice": c.voice, "speed": c.speed, "language": c.language}),
+        stt_dual_results_json=json.dumps({
+            "prisma_v25": dual_asr.get("prisma_v25"),
+            "prisma_v30": dual_asr.get("prisma_v30"),
+            "consensus_score": dual_asr.get("consensus_score", 100.0),
+            "both_agree": dual_asr.get("both_agree", True)
+        }, ensure_ascii=False),
+        tts_request_json=json.dumps({"model": model_name, "voice": voice_name, "speed": c.speed, "language": c.language}),
         metrics_json=json.dumps(check_results["metrics"], ensure_ascii=False),
         injected_fault=injected_fault
     )
@@ -379,7 +373,8 @@ async def upload_and_analyze(
 
     gnani_client = get_gnani_client()
     try:
-        stt_res = await gnani_client.transcribe(audio_path=str(norm_wav), language=c.language)
+        dual_asr = await gnani_client.transcribe_dual_asr(audio_path=str(norm_wav), language=c.language)
+        stt_res = dual_asr["primary_result"]
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Prisma transcription failed: {str(e)}")
 
@@ -403,9 +398,17 @@ async def upload_and_analyze(
         duration_s=acoustic_data.get("duration_s", duration_s),
         sample_rate=16000,
         channels=1,
+        tts_model="EXTERNAL_UPLOAD",
+        tts_voice="EXTERNAL_RECORDING",
         transcript_text=stt_res.text,
         transcript_words_json=json.dumps(stt_res.words, ensure_ascii=False),
         stt_raw_json=json.dumps(stt_res.raw_json, ensure_ascii=False),
+        stt_dual_results_json=json.dumps({
+            "prisma_v25": dual_asr.get("prisma_v25"),
+            "prisma_v30": dual_asr.get("prisma_v30"),
+            "consensus_score": dual_asr.get("consensus_score", 100.0),
+            "both_agree": dual_asr.get("both_agree", True)
+        }, ensure_ascii=False),
         metrics_json=json.dumps(check_results["metrics"], ensure_ascii=False),
         injected_fault=injected_fault
     )

@@ -6,11 +6,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from .config import settings
-from .db import engine, Base
-from .routers import cases, runs, findings, reviews, capsules, exports, health, arena, benchmarks
+from .db import engine, Base, ensure_schema
+from .routers import cases, runs, findings, reviews, capsules, exports, health
 
-# Create DB tables
+# Create DB tables & ensure schema migrations
 Base.metadata.create_all(bind=engine)
+ensure_schema(engine)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -65,17 +66,8 @@ app.include_router(reviews.router, prefix=settings.API_PREFIX)
 app.include_router(capsules.router, prefix=settings.API_PREFIX)
 app.include_router(exports.router, prefix=settings.API_PREFIX)
 app.include_router(health.router, prefix=settings.API_PREFIX)
-app.include_router(arena.router, prefix=settings.API_PREFIX)
-app.include_router(benchmarks.router, prefix=settings.API_PREFIX)
 # Also root /health
 app.include_router(health.router)
-
-@app.get("/api/audio/{filename}")
-def serve_audio_file(filename: str):
-    file_path = settings.AUDIO_STORE_PATH / filename
-    if not file_path.exists():
-        raise StarletteHTTPException(status_code=404, detail="Audio file not found")
-    return FileResponse(path=str(file_path), media_type="audio/wav", filename=filename)
 
 # Mount Frontend static distribution if built
 FRONTEND_DIST = settings.BASE_DIR / "frontend" / "dist"

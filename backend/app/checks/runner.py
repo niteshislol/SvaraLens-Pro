@@ -6,8 +6,6 @@ from .clipping import check_audio_clipping
 from .silence import check_unexpected_silence
 from .pace import check_speaking_pace
 from .entities import check_entity_mismatch, check_transcript_divergence
-from .suppression import check_small_utterance_suppression
-from .register import check_dialect_register_inflation
 from ..text.compare import compute_wer_cer
 
 def run_all_checks(
@@ -65,16 +63,6 @@ def run_all_checks(
     div_finding = check_transcript_divergence(wer_cer)
     if div_finding:
         findings.append(div_finding)
-
-    # 8. Small Utterance Suppression (Gnani Research Section 4)
-    supp_finding = check_small_utterance_suppression(reference_text, transcript_text)
-    if supp_finding:
-        findings.append(supp_finding)
-
-    # 9. Dialect Register Normalization (Gnani Research Section 4)
-    reg_finding = check_dialect_register_inflation(reference_text, transcript_text)
-    if reg_finding:
-        findings.append(reg_finding)
 
     return {
         "findings": findings,

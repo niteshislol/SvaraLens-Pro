@@ -59,6 +59,8 @@ def get_run_detail(id: str, db: Session = Depends(get_db)):
 
     metrics = json.loads(run.metrics_json) if run.metrics_json else {}
     words = json.loads(run.transcript_words_json) if run.transcript_words_json else []
+    dual_results = json.loads(run.stt_dual_results_json) if run.stt_dual_results_json else None
+    pins = json.loads(run.defect_pins_json) if run.defect_pins_json else []
 
     return RunRead(
         id=run.id,
@@ -70,8 +72,12 @@ def get_run_detail(id: str, db: Session = Depends(get_db)):
         duration_s=run.duration_s,
         sample_rate=run.sample_rate,
         channels=run.channels,
+        tts_model=getattr(run, "tts_model", "timbre-v3.0") or "timbre-v3.0",
+        tts_voice=getattr(run, "tts_voice", "Shivani") or "Shivani",
         transcript_text=run.transcript_text,
         transcript_words=words,
+        stt_dual_results=dual_results,
+        defect_pins=pins,
         metrics=metrics,
         injected_fault=run.injected_fault,
         error=run.error,
@@ -79,6 +85,41 @@ def get_run_detail(id: str, db: Session = Depends(get_db)):
         findings=parsed_findings,
         reviews=parsed_reviews
     )
+
+@router.post("/{id}/pins", response_model=RunRead)
+def add_defect_pin(id: str, pin_data: dict, db: Session = Depends(get_db)):
+    run = db.query(Run).filter(Run.id == id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    import uuid
+    from datetime import datetime, timezone
+    existing_pins = json.loads(run.defect_pins_json) if run.defect_pins_json else []
+    new_pin = {
+        "id": f"PIN-{uuid.uuid4().hex[:6].upper()}",
+        "timestamp_start_s": float(pin_data.get("timestamp_start_s", 0.0)),
+        "timestamp_end_s": float(pin_data.get("timestamp_end_s", 0.0)),
+        "category": pin_data.get("category", "END_TRUNCATION"),
+        "severity": pin_data.get("severity", "HIGH"),
+        "note": pin_data.get("note", ""),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    existing_pins.append(new_pin)
+    run.defect_pins_json = json.dumps(existing_pins, ensure_ascii=False)
+    db.commit()
+    return get_run_detail(id, db)
+
+@router.delete("/{id}/pins/{pin_id}", response_model=RunRead)
+def remove_defect_pin(id: str, pin_id: str, db: Session = Depends(get_db)):
+    run = db.query(Run).filter(Run.id == id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    existing_pins = json.loads(run.defect_pins_json) if run.defect_pins_json else []
+    existing_pins = [p for p in existing_pins if p.get("id") != pin_id]
+    run.defect_pins_json = json.dumps(existing_pins, ensure_ascii=False)
+    db.commit()
+    return get_run_detail(id, db)
 
 @router.get("/{id}/audio")
 def get_run_audio(id: str, db: Session = Depends(get_db)):

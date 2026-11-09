@@ -8,6 +8,35 @@ export interface CriticalPhrase {
   severity: Severity;
 }
 
+export interface DefectPin {
+  id: string;
+  timestamp_start_s: number;
+  timestamp_end_s: number;
+  category: 'END_TRUNCATION' | 'PRONUNCIATION' | 'CODE_SWITCH_GLITCH' | 'PROSODY_PAUSE' | 'CLIPPING' | 'OTHER';
+  severity: Severity;
+  note: string;
+  created_at: string;
+}
+
+export interface DualAsrResults {
+  prisma_v25?: {
+    model: string;
+    text: string;
+    duration_s: number;
+    request_id?: string;
+  };
+  prisma_v30?: {
+    model: string;
+    text: string;
+    duration_s: number;
+    request_id?: string;
+    detected_language?: string;
+    latency_ms?: number;
+  };
+  consensus_score: number;
+  both_agree: boolean;
+}
+
 export interface TestCase {
   id: string;
   suite_id: string;
@@ -16,6 +45,7 @@ export interface TestCase {
   reference_text: string;
   critical_phrases: CriticalPhrase[];
   voice?: string;
+  tts_model?: string;
   speed: number;
   channel: Channel;
   pace_min: number;
@@ -79,8 +109,12 @@ export interface Run {
   duration_s?: number;
   sample_rate?: number;
   channels?: number;
+  tts_model?: string;
+  tts_voice?: string;
   transcript_text?: string;
   transcript_words?: Array<{ word: string; start: number; end: number }>;
+  stt_dual_results?: DualAsrResults;
+  defect_pins?: DefectPin[];
   metrics?: {
     wer?: number;
     cer?: number;
@@ -182,99 +216,4 @@ export interface Health {
   timbre_model: string;
   prisma_model: string;
   database_connected: boolean;
-}
-
-export interface ModelOption {
-  id: string;
-  name: string;
-  provider: string;
-  type: 'TTS' | 'ASR';
-  badge: string;
-  languages: string[];
-  default_voice?: string;
-  voices?: string[];
-  avg_latency_ms?: number;
-  telephony_native?: boolean;
-  telephony_optimized?: boolean;
-  features?: string[];
-}
-
-export interface ArenaModelResult {
-  model_id: string;
-  provider: string;
-  transcript: string;
-  latency_ms: number;
-  metrics: {
-    wer: number;
-    cer: number;
-    insertions: number;
-    deletions: number;
-    substitutions: number;
-    duration_s: number;
-    sample_rate: number;
-    peak_db: number;
-    clip_ratio: number;
-    silence_regions_count: number;
-    pace_wps: number;
-  };
-  findings: Finding[];
-}
-
-export interface ArenaComparisonResponse {
-  session_id: string;
-  reference_text: string;
-  language: string;
-  channel_meta: {
-    channel_mode: string;
-    sample_rate: number;
-    codec: string;
-    bandwidth_hz: string;
-    noise_injected: boolean;
-    snr_db?: number;
-    duration_s?: number;
-  };
-  audio_url: string;
-  duration_s: number;
-  tts_result: {
-    model: string;
-    provider: string;
-    voice: string;
-    latency_ms: number;
-  };
-  model_a: ArenaModelResult;
-  model_b: ArenaModelResult;
-  delta: {
-    wer_diff: number;
-    cer_diff: number;
-    latency_diff_ms: number;
-    faster_model: string;
-    more_accurate_model: string;
-  };
-}
-
-export interface BenchmarkDataset {
-  id: string;
-  name: string;
-  publisher: string;
-  description: string;
-  acoustic_profile: string;
-  hours: string;
-  relevance: string;
-}
-
-export interface BenchmarkModelScore {
-  model_id: string;
-  model_name: string;
-  provider: string;
-  architecture: string;
-  scores: Record<string, { wer: number; cer: number; latency_ms: number }>;
-  small_utterance_retention: string;
-  dialect_preservation_score: string;
-  hallucination_rate: string;
-}
-
-export interface BenchmarkMatrixResponse {
-  datasets: BenchmarkDataset[];
-  models: BenchmarkModelScore[];
-  methodology: Record<string, string>;
 }

@@ -1,6 +1,5 @@
 import {
-  TestCase, Run, Finding, Review, Capsule, RegressionRun, SuiteSummary, Health,
-  ModelOption, ArenaComparisonResponse, BenchmarkMatrixResponse
+  TestCase, Run, Finding, Review, Capsule, RegressionRun, SuiteSummary, Health
 } from '../types';
 
 const API_BASE = '/api';
@@ -52,11 +51,48 @@ export async function importCasesCsv(file: File, suiteId: string = 'suite-insura
   return res.json();
 }
 
-export async function triggerGenerateRun(caseId: string, injectedFault?: string): Promise<{ run_id: string; status: string; findings_count: number }> {
-  let url = `${API_BASE}/cases/${caseId}/runs/generate`;
-  if (injectedFault) url += `?injected_fault=${injectedFault}`;
+export async function triggerGenerateRun(
+  caseId: string,
+  injectedFault?: string,
+  ttsModel?: string,
+  ttsVoice?: string
+): Promise<{ run_id: string; status: string; findings_count: number }> {
+  const params = new URLSearchParams();
+  if (injectedFault) params.append('injected_fault', injectedFault);
+  if (ttsModel) params.append('tts_model', ttsModel);
+  if (ttsVoice) params.append('tts_voice', ttsVoice);
+
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  const url = `${API_BASE}/cases/${caseId}/runs/generate${qs}`;
   const res = await fetch(url, { method: 'POST' });
   if (!res.ok) throw new Error('Failed to generate Timbre run');
+  return res.json();
+}
+
+export async function addDefectPin(
+  runId: string,
+  pin: {
+    timestamp_start_s: number;
+    timestamp_end_s: number;
+    category: string;
+    severity?: string;
+    note: string;
+  }
+): Promise<Run> {
+  const res = await fetch(`${API_BASE}/runs/${runId}/pins`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(pin)
+  });
+  if (!res.ok) throw new Error('Failed to add defect pin');
+  return res.json();
+}
+
+export async function removeDefectPin(runId: string, pinId: string): Promise<Run> {
+  const res = await fetch(`${API_BASE}/runs/${runId}/pins/${pinId}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) throw new Error('Failed to remove defect pin');
   return res.json();
 }
 
@@ -155,40 +191,5 @@ export async function addReview(runId: string, reviewData: any): Promise<Review>
     body: JSON.stringify(reviewData)
   });
   if (!res.ok) throw new Error('Failed to add review');
-  return res.json();
-}
-
-export async function fetchArenaModels(): Promise<{ tts_models: ModelOption[]; asr_models: ModelOption[] }> {
-  const res = await fetch(`${API_BASE}/arena/models`);
-  if (!res.ok) throw new Error('Failed to fetch arena models');
-  return res.json();
-}
-
-export async function runArenaComparison(payload: {
-  case_id?: string;
-  reference_text?: string;
-  language?: string;
-  tts_model: string;
-  voice?: string;
-  model_a: string;
-  model_b: string;
-  channel: string;
-  injected_fault?: string;
-}): Promise<ArenaComparisonResponse> {
-  const res = await fetch(`${API_BASE}/arena/compare`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || err.detail || 'Arena comparison failed');
-  }
-  return res.json();
-}
-
-export async function fetchBenchmarkMatrix(): Promise<BenchmarkMatrixResponse> {
-  const res = await fetch(`${API_BASE}/benchmarks/matrix`);
-  if (!res.ok) throw new Error('Failed to fetch benchmark matrix');
   return res.json();
 }
