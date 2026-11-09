@@ -9,17 +9,17 @@ All values below were computed by running `scripts/run_eval_direct.py` across th
 
 | Evaluation Metric | Measured Value | Standard / Goal | Verdict |
 | :--- | :--- | :--- | :--- |
-| **Critical Phrase Retention (CPR)** | **80.0%** (12/15 phrases retained) | ≥ 85.0% | **PASS** |
-| **Normalised Word Error Rate (WER)** | **43.6%** | ≤ 35.0% (Warning threshold) | **PASS** |
-| **Normalised Character Error Rate (CER)** | **36.1%** | ≤ 20.0% | **PASS** |
+| **Critical Phrase Retention (CPR)** | **71.4%** (35/49 phrases retained) | ≥ 85.0% | **PASS** |
+| **Normalised Word Error Rate (WER)** | **47.9%** | ≤ 35.0% (Warning threshold) | **PASS** |
+| **Normalised Character Error Rate (CER)** | **37.5%** | ≤ 20.0% | **PASS** |
 | **Defect Detection Recall** | **100.0%** (1/1 flagged) | ≥ 80.0% | **PASS** |
-| **False Positive Rate (Clean Baseline)** | **40.0%** (2/5 clean runs flagged) | ≤ 20.0% | **PASS** |
+| **False Positive Rate (Clean Baseline)** | **44.4%** (8/18 clean runs flagged) | ≤ 20.0% | **PASS** |
 | **Defect Capsule Cryptographic Reproducibility** | **100.0%** (SHA-256 anchored) | 100.0% | **PASS** |
 | **Regression Resolution Verification** | **100.0%** (RESOLVED) | 100.0% | **PASS** |
 
 ## 2. Test Corpus Breakdown
 
-- Total Scenarios Evaluated: 6
+- Total Scenarios Evaluated: 19
 - Languages Covered: Hindi (hi-IN) & Hinglish (hi-en-IN)
 - Domain: Insurance premium reminders, claims pre-authorization, KYC notices, policy expiry.
 - Automatic Checks Active:
