@@ -80,6 +80,9 @@ def create_test_case(case_in: TestCaseCreate, db: Session = Depends(get_db)):
         existing.critical_phrases_json = crit_json
         existing.severity = case_in.severity
         existing.channel = case_in.channel
+        existing.voice = case_in.voice or "Shivani"
+        if hasattr(existing, "tts_model"):
+            existing.tts_model = case_in.tts_model or "timbre-v3.0"
         db.commit()
         db.refresh(existing)
         db_case = existing
@@ -91,7 +94,8 @@ def create_test_case(case_in: TestCaseCreate, db: Session = Depends(get_db)):
             language=case_in.language,
             reference_text=case_in.reference_text,
             critical_phrases_json=crit_json,
-            voice=case_in.voice or "ananya",
+            voice=case_in.voice or "Shivani",
+            tts_model=case_in.tts_model or "timbre-v3.0",
             speed=case_in.speed,
             channel=case_in.channel,
             pace_min=case_in.pace_min,
@@ -210,7 +214,8 @@ async def import_cases_csv(
                 language=lang,
                 reference_text=ref,
                 critical_phrases_json=json.dumps(crit_phrases, ensure_ascii=False),
-                voice="ananya",
+                voice="Shivani",
+                tts_model="timbre-v3.0",
                 speed=1.0,
                 channel="standard",
                 severity=severity if severity in ('LOW','MEDIUM','HIGH','CRITICAL') else "HIGH",

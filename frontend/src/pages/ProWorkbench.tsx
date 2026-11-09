@@ -7,7 +7,7 @@ import {
   getAudioUrl
 } from '../api/client';
 import { ProWaveformPlayer } from '../components/ProWaveformPlayer';
-import { ModelArenaSelector } from '../components/ModelArenaSelector';
+import { ModelArenaSelector, V3_PERSONAS, V25_PERSONAS } from '../components/ModelArenaSelector';
 import { DualAsrJury } from '../components/DualAsrJury';
 import { DefectPinDrawer } from '../components/DefectPinDrawer';
 import { TranscriptDiff } from '../components/TranscriptDiff';
@@ -15,7 +15,7 @@ import { BeforeAfterTable } from '../components/BeforeAfterTable';
 import {
   Play, Plus, Upload, Sparkles, Pin, ShieldCheck, CheckCircle2,
   AlertTriangle, Activity, Volume2, ArrowRight, Loader2, Gauge,
-  FileText, Check, Clock, RefreshCw, Layers, Search
+  FileText, Check, Clock, RefreshCw, Layers, Search, X, Wand2
 } from 'lucide-react';
 
 interface ProWorkbenchProps {
@@ -52,9 +52,18 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
   const [rerunningRegression, setRerunningRegression] = useState(false);
   const [rightTab, setRightTab] = useState<'radar' | 'pins' | 'capsule'>('radar');
 
-  // Modals
+  // Modals & New Case Form State
   const [showNewCaseModal, setShowNewCaseModal] = useState(false);
   const [csvUploading, setCsvUploading] = useState(false);
+  const [newScenario, setNewScenario] = useState('');
+  const [newLanguage, setNewLanguage] = useState<'hi-IN' | 'hinglish'>('hi-IN');
+  const [newTtsModel, setNewTtsModel] = useState<'timbre-v3.0' | 'timbre-v2.5'>('timbre-v3.0');
+  const [newVoice, setNewVoice] = useState('Shivani');
+  const [newSeverity, setNewSeverity] = useState<'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'>('HIGH');
+  const [newChannel, setNewChannel] = useState<'standard' | 'tel_8k'>('standard');
+  const [newReferenceText, setNewReferenceText] = useState('');
+  const [newCriticalPhrases, setNewCriticalPhrases] = useState('');
+  const [creatingCase, setCreatingCase] = useState(false);
 
   // Load all Test Cases
   const loadCases = async () => {
@@ -210,6 +219,85 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
     }
   };
 
+  // Preset Autofill for Quick Scenario Creation
+  const applyPreset = (preset: 'health' | 'motor' | 'ivr') => {
+    if (preset === 'health') {
+      setNewScenario('Health Cashless Claim Pre-Auth');
+      setNewLanguage('hi-IN');
+      setNewTtsModel('timbre-v3.0');
+      setNewVoice('Shivani');
+      setNewSeverity('HIGH');
+      setNewChannel('standard');
+      setNewReferenceText('नमस्ते, आपका अपोलो हॉस्पिटल में ₹45,000 का कैशलेस क्लेम मंज़ूर हो गया है। कृपया डिस्चार्ज के समय मूल दस्तावेज काउंटर पर प्रस्तुत करें।');
+      setNewCriticalPhrases('₹45,000, अपोलो हॉस्पिटल, कैशलेस क्लेम');
+    } else if (preset === 'motor') {
+      setNewScenario('Motor Insurance NCB Renewal Alert');
+      setNewLanguage('hinglish');
+      setNewTtsModel('timbre-v3.0');
+      setNewVoice('Avinash');
+      setNewSeverity('CRITICAL');
+      setNewChannel('standard');
+      setNewReferenceText('Hello, आपकी Swift Dzire की कार बीमा पॉलिसी 24 November को समाप्त हो रही है। 50% No Claim Bonus सुरक्षित रखने के लिए आज ही रिन्यू करें।');
+      setNewCriticalPhrases('Swift Dzire, 24 November, 50% No Claim Bonus');
+    } else if (preset === 'ivr') {
+      setNewScenario('Telephony Premium Reminder');
+      setNewLanguage('hi-IN');
+      setNewTtsModel('timbre-v2.5');
+      setNewVoice('Nalini');
+      setNewSeverity('HIGH');
+      setNewChannel('tel_8k');
+      setNewReferenceText('प्रिय ग्राहक, आपकी जीवन बीमा प्रीमियम ₹3,200 15 तारीख तक देय है। लेट फीस से बचने के लिए तुरंत भुगतान करें।');
+      setNewCriticalPhrases('₹3,200, 15 तारीख, जीवन बीमा');
+    }
+  };
+
+  // Create Scenario Handler
+  const handleCreateCase = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newScenario.trim() || !newReferenceText.trim()) {
+      alert('Please provide both Scenario Title and Reference Spoken Text.');
+      return;
+    }
+    try {
+      setCreatingCase(true);
+      const phrases = newCriticalPhrases
+        .split(',')
+        .map(p => p.trim())
+        .filter(p => p.length > 0)
+        .map(p => ({
+          text: p,
+          variants: [],
+          severity: newSeverity
+        }));
+
+      const created = await createTestCase({
+        suite_id: 'suite-insurance-hi',
+        scenario: newScenario.trim(),
+        language: newLanguage,
+        reference_text: newReferenceText.trim(),
+        critical_phrases: phrases,
+        tts_model: newTtsModel,
+        voice: newVoice,
+        severity: newSeverity,
+        channel: newChannel,
+        speed: 1.0,
+      });
+
+      setShowNewCaseModal(false);
+      setNewScenario('');
+      setNewReferenceText('');
+      setNewCriticalPhrases('');
+
+      await loadCases();
+      setSelectedCaseId(created.id);
+      alert(`Scenario ${created.id} created successfully! Ready for multi-model synthesis.`);
+    } catch (err) {
+      alert(`Failed to create scenario: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setCreatingCase(false);
+    }
+  };
+
   // Filtered cases list
   const filteredCases = cases.filter(c => {
     const matchesSearch = c.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -220,7 +308,8 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
   });
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-[calc(100vh-100px)]">
+    <>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-[calc(100vh-100px)]">
       {/* =========================================================================
           LEFT PANE: SCENARIO & TEST EXPLORER (3 Cols)
           ========================================================================= */}
@@ -318,6 +407,17 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
               </div>
             );
           })}
+        </div>
+
+        {/* Left Pane Footer: New Scenario Action */}
+        <div className="pt-2.5 mt-auto border-t border-[#1D2230]">
+          <button
+            onClick={() => setShowNewCaseModal(true)}
+            className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg bg-[#171C26] hover:bg-[#212836] text-[#4F8CFF] hover:text-white border border-[#4F8CFF]/30 hover:border-[#4F8CFF] transition-all shadow-sm"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Create New Scenario</span>
+          </button>
         </div>
       </div>
 
@@ -663,5 +763,260 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
         )}
       </div>
     </div>
+
+    {/* =========================================================================
+        MODAL: CREATE NEW TEST SCENARIO
+        ========================================================================= */}
+    {showNewCaseModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+        <div
+          className="bg-[#11141B] border border-[#1D2230] rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl p-6 space-y-5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Modal Header */}
+          <div className="flex items-center justify-between border-b border-[#1D2230] pb-4">
+            <div>
+              <h3 className="text-base font-bold text-[#F3F4F6] flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[#4F8CFF]" />
+                <span>Create Indic Voice QA Scenario</span>
+              </h3>
+              <p className="text-xs text-[#94A3B8]">
+                Define expected ground-truth script, target Gnani speech engine, voice persona, and mandatory tokens.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowNewCaseModal(false)}
+              className="p-1.5 rounded-lg text-[#64748B] hover:text-white hover:bg-[#1D2230] transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Quick Presets Chips */}
+          <div className="bg-[#171C26] border border-[#222938] rounded-xl p-3 space-y-2">
+            <div className="text-[11px] font-mono text-[#94A3B8] flex items-center gap-1.5">
+              <Wand2 className="w-3.5 h-3.5 text-[#8B5CF6]" />
+              <span>Quick Presets (Click to autofill)</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => applyPreset('health')}
+                className="px-2.5 py-1 rounded bg-[#080A0E] hover:bg-[#222938] text-[11px] text-[#4F8CFF] border border-[#4F8CFF]/30 hover:border-[#4F8CFF] transition-colors"
+              >
+                🏥 Health Cashless Claim (Hindi)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('motor')}
+                className="px-2.5 py-1 rounded bg-[#080A0E] hover:bg-[#222938] text-[11px] text-[#10B981] border border-[#10B981]/30 hover:border-[#10B981] transition-colors"
+              >
+                🚗 Motor NCB Renewal (Hinglish)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('ivr')}
+                className="px-2.5 py-1 rounded bg-[#080A0E] hover:bg-[#222938] text-[11px] text-[#F59E0B] border border-[#F59E0B]/30 hover:border-[#F59E0B] transition-colors"
+              >
+                📞 8kHz Telephony Due Alert
+              </button>
+            </div>
+          </div>
+
+          {/* Form */}
+          <form onSubmit={handleCreateCase} className="space-y-4">
+            {/* Scenario Name */}
+            <div>
+              <label className="block text-xs font-mono text-[#94A3B8] mb-1.5">
+                Scenario Title <span className="text-[#EF4444]">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. Term Life Insurance Maturity Payout"
+                value={newScenario}
+                onChange={(e) => setNewScenario(e.target.value)}
+                className="w-full bg-[#080A0E] border border-[#222938] focus:border-[#4F8CFF] rounded-lg px-3 py-2 text-xs text-[#F3F4F6] placeholder-[#64748B] outline-none transition-colors"
+              />
+            </div>
+
+            {/* Language & Severity */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-mono text-[#94A3B8] mb-1.5">
+                  Language / Dialect <span className="text-[#EF4444]">*</span>
+                </label>
+                <select
+                  value={newLanguage}
+                  onChange={(e) => setNewLanguage(e.target.value as any)}
+                  className="w-full bg-[#080A0E] border border-[#222938] focus:border-[#4F8CFF] rounded-lg px-3 py-2 text-xs text-[#F3F4F6] outline-none transition-colors"
+                >
+                  <option value="hi-IN">Hindi (hi-IN) - Devanagari</option>
+                  <option value="hinglish">Hinglish - Mixed Indian English</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-[#94A3B8] mb-1.5">
+                  Defect Severity Level <span className="text-[#EF4444]">*</span>
+                </label>
+                <select
+                  value={newSeverity}
+                  onChange={(e) => setNewSeverity(e.target.value as any)}
+                  className="w-full bg-[#080A0E] border border-[#222938] focus:border-[#4F8CFF] rounded-lg px-3 py-2 text-xs text-[#F3F4F6] outline-none transition-colors"
+                >
+                  <option value="CRITICAL">CRITICAL (Financial / Regulatory Truncation)</option>
+                  <option value="HIGH">HIGH (Amount or Policy Date Error)</option>
+                  <option value="MEDIUM">MEDIUM (Pronunciation or Unnatural Tone)</option>
+                  <option value="LOW">LOW (Minor Pause / Hesitation)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Gnani Engine Model & Voice Persona */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-mono text-[#94A3B8] mb-1.5">
+                  Synthesis Model Engine <span className="text-[#EF4444]">*</span>
+                </label>
+                <select
+                  value={newTtsModel}
+                  onChange={(e) => {
+                    const mod = e.target.value as 'timbre-v3.0' | 'timbre-v2.5';
+                    setNewTtsModel(mod);
+                    setNewVoice(mod === 'timbre-v3.0' ? 'Shivani' : 'Nalini');
+                  }}
+                  className="w-full bg-[#080A0E] border border-[#222938] focus:border-[#4F8CFF] rounded-lg px-3 py-2 text-xs text-[#F3F4F6] outline-none transition-colors"
+                >
+                  <option value="timbre-v3.0">Timbre v3.0 (Indic-Expressive Sovereign)</option>
+                  <option value="timbre-v2.5">Timbre v2.5 (Telephony Baseline)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-[#94A3B8] mb-1.5">
+                  Voice Persona <span className="text-[#EF4444]">*</span>
+                </label>
+                <select
+                  value={newVoice}
+                  onChange={(e) => setNewVoice(e.target.value)}
+                  className="w-full bg-[#080A0E] border border-[#222938] focus:border-[#4F8CFF] rounded-lg px-3 py-2 text-xs text-[#F3F4F6] outline-none transition-colors"
+                >
+                  {(newTtsModel === 'timbre-v3.0' ? V3_PERSONAS : V25_PERSONAS).map(p => (
+                    <option key={p.name} value={p.name}>
+                      {p.name} ({p.gender}) — {p.character}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Channel Audio Format */}
+            <div>
+              <label className="block text-xs font-mono text-[#94A3B8] mb-1.5">
+                Audio Channel & Sample Rate
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                  newChannel === 'standard'
+                    ? 'bg-[#4F8CFF]/15 border-[#4F8CFF] text-[#F3F4F6]'
+                    : 'bg-[#080A0E] border-[#222938] text-[#94A3B8]'
+                }`}>
+                  <input
+                    type="radio"
+                    name="channel"
+                    value="standard"
+                    checked={newChannel === 'standard'}
+                    onChange={() => setNewChannel('standard')}
+                    className="text-[#4F8CFF]"
+                  />
+                  <div>
+                    <div className="text-xs font-medium">Standard Hi-Fi</div>
+                    <div className="text-[10px] text-[#64748B]">16kHz / 24kHz Studio Audio</div>
+                  </div>
+                </label>
+
+                <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                  newChannel === 'tel_8k'
+                    ? 'bg-[#4F8CFF]/15 border-[#4F8CFF] text-[#F3F4F6]'
+                    : 'bg-[#080A0E] border-[#222938] text-[#94A3B8]'
+                }`}>
+                  <input
+                    type="radio"
+                    name="channel"
+                    value="tel_8k"
+                    checked={newChannel === 'tel_8k'}
+                    onChange={() => setNewChannel('tel_8k')}
+                    className="text-[#4F8CFF]"
+                  />
+                  <div>
+                    <div className="text-xs font-medium">Telephony IVR</div>
+                    <div className="text-[10px] text-[#64748B]">8kHz μ-law / Bandpass</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Reference Spoken Text */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-mono text-[#94A3B8]">
+                  Reference Spoken Text <span className="text-[#EF4444]">*</span>
+                </label>
+                <span className="text-[10px] text-[#64748B] font-mono">Devanagari or Hinglish supported</span>
+              </div>
+              <textarea
+                required
+                rows={3}
+                placeholder="e.g. आपकी अगली किस्त ₹4,250 12 नवंबर तक देय है। लेट पेमेंट चार्ज ₹150 लागू हो सकता है।"
+                value={newReferenceText}
+                onChange={(e) => setNewReferenceText(e.target.value)}
+                className="w-full bg-[#080A0E] border border-[#222938] focus:border-[#4F8CFF] rounded-lg p-3 text-xs text-[#F3F4F6] placeholder-[#64748B] font-devanagari outline-none transition-colors"
+              />
+            </div>
+
+            {/* Critical Phrases */}
+            <div>
+              <label className="block text-xs font-mono text-[#94A3B8] mb-1.5">
+                Critical Phrases / Mandatory Tokens (comma-separated)
+              </label>
+              <input
+                type="text"
+                placeholder="₹4,250, 12 नवंबर, लेट फीस ₹150"
+                value={newCriticalPhrases}
+                onChange={(e) => setNewCriticalPhrases(e.target.value)}
+                className="w-full bg-[#080A0E] border border-[#222938] focus:border-[#4F8CFF] rounded-lg px-3 py-2 text-xs text-[#F3F4F6] placeholder-[#64748B] font-devanagari outline-none transition-colors"
+              />
+              <p className="mt-1 text-[10px] text-[#64748B]">
+                Dual-ASR Jury (Prisma v2.5 & v3.0) will cross-verify each token against synthesised audio.
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#1D2230]">
+              <button
+                type="button"
+                onClick={() => setShowNewCaseModal(false)}
+                disabled={creatingCase}
+                className="px-4 py-2 text-xs font-medium text-[#94A3B8] hover:text-[#F3F4F6] transition-colors"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="submit"
+                disabled={creatingCase}
+                className="inline-flex items-center gap-2 px-5 py-2 text-xs font-bold rounded-lg bg-[#4F8CFF] hover:bg-[#3D78E6] disabled:opacity-50 text-white transition-all shadow-md"
+              >
+                {creatingCase ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                <span>{creatingCase ? 'Creating Scenario...' : 'Create Scenario'}</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )}
+  </>
   );
 };
