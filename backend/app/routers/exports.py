@@ -121,3 +121,71 @@ def get_suite_html_report_export(id: str, db: Session = Depends(get_db)):
 
     html_content = export_suite_html_report(suite_name, summary, cases_data, caps_data)
     return Response(content=html_content, media_type="text/html")
+
+@router.get("/analytics/suite/{id}")
+def get_suite_analytics(id: str, db: Session = Depends(get_db)):
+    """
+    Computes real database metrics and release readiness gates per Section 12 of Master Build Document.
+    """
+    cases = db.query(TestCase).filter(TestCase.suite_id == id).all()
+    case_ids = [c.id for c in cases]
+
+    lang_counts = {}
+    sev_counts = {}
+    for c in cases:
+        lang_counts[c.language] = lang_counts.get(c.language, 0) + 1
+        sev_counts[c.severity] = sev_counts.get(c.severity, 0) + 1
+
+    runs = db.query(Run).filter(Run.case_id.in_(case_ids)).all() if case_ids else []
+    run_ids = [r.id for r in runs]
+    findings = db.query(Finding).filter(Finding.run_id.in_(run_ids)).all() if run_ids else []
+
+    defects_by_cat = {}
+    for f in findings:
+        if f.status in ("WARN", "SUSPECTED", "FAIL"):
+            defects_by_cat[f.check_type] = defects_by_cat.get(f.check_type, 0) + 1
+
+    capsules = db.query(Capsule).filter(Capsule.case_id.in_(case_ids)).all() if case_ids else []
+    open_critical_caps = [c.id for c in capsules if c.state in ("OPEN", "REOPENED") and c.severity == "CRITICAL"]
+    pending_critical_reviews = [f.id for f in findings if f.review_state in ("AUTO_DETECTED", "NEEDS_SECOND_REVIEW") and f.severity == "CRITICAL"]
+
+    # Release Readiness Gate
+    is_ready = (len(open_critical_caps) == 0 and len(pending_critical_reviews) == 0)
+    blockers = []
+    if open_critical_caps:
+        blockers.append(f"{len(open_critical_caps)} unresolved CRITICAL Voice Defect Capsule(s): {', '.join(open_critical_caps)}")
+    if pending_critical_reviews:
+        blockers.append(f"{len(pending_critical_reviews)} unverified CRITICAL automated finding(s)")
+
+    # Model latency & consensus averages
+    dual_runs = [r for r in runs if r.stt_dual_results_json]
+    avg_consensus = 0.0
+    if dual_runs:
+        consensus_scores = []
+        for r in dual_runs:
+            try:
+                sc = json.loads(r.stt_dual_results_json).get("consensus_score")
+                if sc is not None:
+                    consensus_scores.append(float(sc))
+            except Exception:
+                pass
+        if consensus_scores:
+            avg_consensus = round(sum(consensus_scores) / len(consensus_scores), 1)
+
+    return {
+        "suite_id": id,
+        "total_scenarios": len(cases),
+        "total_runs": len(runs),
+        "language_distribution": lang_counts,
+        "severity_distribution": sev_counts,
+        "defects_by_category": defects_by_cat,
+        "dual_asr_average_consensus": avg_consensus,
+        "open_capsules_count": sum(1 for c in capsules if c.state == "OPEN"),
+        "resolved_capsules_count": sum(1 for c in capsules if c.state == "RESOLVED"),
+        "release_readiness": {
+            "status": "READY_FOR_RELEASE" if is_ready else "BLOCKED",
+            "is_approved": is_ready,
+            "blockers_count": len(blockers),
+            "blockers": blockers
+        }
+    }

@@ -9,6 +9,7 @@ from pathlib import Path
 from rapidfuzz import fuzz
 from ..config import settings
 from ..text.normalize_hi import normalize_text_hindi
+from ..text.compare import compute_wer_cer
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,7 @@ class LiveGnaniClient:
             }
         }
 
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     resp = await client.post(url, headers=headers, json=payload)
@@ -131,10 +132,11 @@ class LiveGnaniClient:
                     return resp.content
             except Exception as e:
                 logger.warning(f"Timbre attempt {attempt+1} failed: {e}")
-                if attempt == 0:
-                    await asyncio.sleep(1.0)
+                if attempt < 2:
+                    wait_time = 2.0 * (attempt + 1)
+                    await asyncio.sleep(wait_time)
                     continue
-                raise RuntimeError(f"Gnani Timbre synthesis failed after retry: {e}") from e
+                raise RuntimeError(f"Gnani Timbre synthesis failed after 3 attempts: {e}") from e
 
         raise RuntimeError("Gnani Timbre synthesis unreachable.")
 
@@ -162,7 +164,7 @@ class LiveGnaniClient:
         stt_model = model or settings.PRISMA_MODEL or "prisma-v3.0"
         stt_lang = "indic-auto" if stt_model == "prisma-v3.0" else ("hi-IN" if language in ("hi-IN", "hinglish") else language)
 
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     with open(path_obj, "rb") as f:
@@ -195,25 +197,27 @@ class LiveGnaniClient:
                     )
             except Exception as e:
                 logger.warning(f"Prisma ({stt_model}) attempt {attempt+1} failed: {e}")
-                if attempt == 0:
-                    await asyncio.sleep(1.0)
+                if attempt < 2:
+                    wait_time = 2.0 * (attempt + 1)
+                    await asyncio.sleep(wait_time)
                     continue
-                raise RuntimeError(f"Gnani Prisma transcription failed after retry: {e}") from e
+                raise RuntimeError(f"Gnani Prisma transcription failed after 3 attempts: {e}") from e
 
         raise RuntimeError("Gnani Prisma transcription unreachable.")
 
     async def transcribe_dual_asr(
         self,
         audio_path: str,
-        language: str = "hi-IN"
+        language: str = "hi-IN",
+        reference_text: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Runs both Prisma v2.5 and Prisma v3.0 concurrently.
-        Computes the Dual-ASR Consensus metric.
+        Computes the Dual-ASR Consensus metric, plus WER/CER against reference if supplied.
         """
         res_v25, res_v30 = await asyncio.gather(
-            self.transcribe(audio_path, language=language, model="prisma-v2.5"),
-            self.transcribe(audio_path, language=language, model="prisma-v3.0"),
+            self.transcribe(audio_path, language=language, model="prisma-v2.5", reference_text=reference_text),
+            self.transcribe(audio_path, language=language, model="prisma-v3.0", reference_text=reference_text),
             return_exceptions=True
         )
 
@@ -240,6 +244,15 @@ class LiveGnaniClient:
             "detected_language": res_v30.detected_language if isinstance(res_v30, TranscriptResult) else "hi-IN",
             "latency_ms": round(float(res_v30.latency_s or 0.23) * 1000, 1) if isinstance(res_v30, TranscriptResult) else 230.0
         }
+
+        # Calculate WER / CER against ground truth reference text if available
+        if reference_text:
+            wer_cer_v25 = compute_wer_cer(reference_text, t_v25_text)
+            wer_cer_v30 = compute_wer_cer(reference_text, t_v30_text)
+            v25_data["wer"] = wer_cer_v25["wer"]
+            v25_data["cer"] = wer_cer_v25["cer"]
+            v30_data["wer"] = wer_cer_v30["wer"]
+            v30_data["cer"] = wer_cer_v30["cer"]
 
         primary_text = t_v30_text if t_v30_text else t_v25_text
         primary_result = res_v30 if isinstance(res_v30, TranscriptResult) else res_v25

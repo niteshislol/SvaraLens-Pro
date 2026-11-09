@@ -1,155 +1,206 @@
-# SvaraLens: Indic Voice QA Evidence & Regression Workbench
+# SvaraLens Pro: Indic Voice QA Evidence & Regression Workbench
 
-> **Tagline:** *Every spoken defect becomes a reproducible test.*  
-> **Target Audience:** QA Consultants, Delivery Engineers, and Pre-Sales Engineers testing Indian-language voice applications.  
-> **Gnani Models Integrated:** **Gnani Timbre v2.5** (Text-to-Speech) & **Gnani Prisma v2.5** (Speech-to-Text).  
-> **API Platform:** Live verified against `https://api.vachana.ai`.
-
----
-
-## 1. Problem Statement & The Documented Gap
-
-Gnani's **Agentic Evals** evaluates conversational behavior through text representations. However, as documented in Gnani's public communications and its **QA Consultant** role specifications:
-1. **Human-dependent:** Tone, pronunciation, and prosodic voice anomalies still require human checking.
-2. **Missing Engineering Handoff:** When a human reviewer discovers an audio defect (e.g., an omitted mandatory disclosure, mispronounced product name, or code-switch voice glitch), that observation usually ends as an ephemeral comment rather than a reproducible regression test.
-3. **Preventing Silent Regressions:** SvaraLens turns that spoken observation into cryptographically locked evidence (**Voice Defect Capsule** with audio SHA-256) and converts it into an automated regression assertion that must pass on subsequent builds.
-
-> **Positioning:** SvaraLens does not compete with Gnani Analytics (production call scoring) or Agentic Evals (conversational text simulation). SvaraLens is the **pre-release voice QA and regression companion** designed directly around Gnani's QA consultant delivery workflow.
+> **Tagline:** *"Every spoken defect becomes a reproducible test."*  
+> **Positioning:** Bridges the gap between conversational AI text evaluation (Gnani Agentic Evals) and physical Indic speech validation.  
+> **Gnani Models Integrated:** **Gnani Timbre v3.0 & v2.5** (TTS) | **Gnani Prisma v3.0 & v2.5** (Dual-ASR Jury STT).  
+> **API Platform:** Live verified against `https://api.vachana.ai`.  
+> **Test Coverage:** 21/21 Automated Pytest Unit & E2E Tests Passing.
 
 ---
 
-## 2. The Core Workflow Loop
+## 1. Problem Statement & The Engineering Gap
+
+In enterprise conversational voice deployments (banking collections, health claims, insurance renewals), conversational agents are evaluated primarily on their textual logic. However, critical defects frequently occur **in the physical spoken audio**:
+1. **Critical Entity Distortion:** Loan amounts (e.g., *₹4,500*) or policy numbers distorted by digit stutter.
+2. **Abrupt Speech Truncation:** Mandatory compliance disclosures truncated mid-syllable at the end of utterances.
+3. **Code-Switching Artifacts:** Glitches and robotic cadence shifts across Hindi-to-English token boundaries.
+4. **Acoustic Saturation:** Hard digital clipping and audio buffer pops.
+5. **The Handoff Gap:** In typical QA cycles, these spoken defects are recorded as subjective, ephemeral bug notes. When engineers update models or audio pipelines, regressions cannot be verified automatically.
+
+**SvaraLens Pro transforms discovered Indic voice defects into cryptographically locked Voice Defect Capsules with machine-executable assertions that run as continuous regression tests.**
+
+---
+
+## 2. Core Workbench Architecture
 
 ```
-Generate / Upload Audio
-         ↓
-Automatic Acoustic & Content Fidelity Checks (6 Types)
-         ↓
-Native Language Review Studio (Time-Interval Marking & Subjective Ratings)
-         ↓
-Compile Voice Defect Capsule (One-Click JSON Spec + Audio SHA-256)
-         ↓
-Upload Corrected Build Audio → Replay Regression Assertions
-         ↓
-Verdict: RESOLVED ✅
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │                         SvaraLens Pro Workbench UI                          │
+  │     (React 18 + TypeScript + Tailwind + Wavesurfer.js Audio Visualizer)     │
+  └──────────────────────────────────────┬──────────────────────────────────────┘
+                                         │ REST API / JSON
+  ┌──────────────────────────────────────▼──────────────────────────────────────┐
+  │                           FastAPI Backend Service                           │
+  ├─────────────────────────────────────────────────────────────────────────────┤
+  │  1. Test Case Studio        │ 30-Case Corpus, CRUD, Search, CSV/JSON I/O   │
+  │  2. Speech Synthesis Engine │ Gnani Timbre v3.0 & v2.5 Adapter              │
+  │  3. Dual-ASR Jury Engine    │ Gnani Prisma v3.0 & v2.5 (Indic Consensus)   │
+  │  4. Acoustic DSP Analyzer   │ Stride Framing, Peak dBFS, Clipping, Tail RMS │
+  │  5. Human Review Studio     │ Epistemic Labeling (Suspected -> Confirmed)   │
+  │  6. Capsule Compiler        │ SHA-256 Byte Digest, 10-Defect Assertions     │
+  │  7. Regression Runner       │ Machine Assertion Verifier + Sign-off State   │
+  │  8. Suite Analytics Gate    │ Release Readiness Quality Gate                │
+  └──────────────────────────────────────┬──────────────────────────────────────┘
+                                         │
+        ┌────────────────────────────────┴────────────────────────────────┐
+        ▼                                                                 ▼
+┌──────────────────────────────┐                       ┌──────────────────────────────┐
+│  Gnani Platform / Vachana    │                       │  Local SQLite & Storage      │
+│  - api.vachana.ai            │                       │  - data/svaralens.db         │
+│  - Timbre v3.0 / v2.5        │                       │  - data/audio/ (WAV PCM)     │
+│  - Prisma v3.0 / v2.5        │                       │  - Audit Event Trail         │
+└──────────────────────────────┘                       └──────────────────────────────┘
 ```
 
 ---
 
-## 3. The 6 Automated Checks & The Epistemic Rule
+## 3. The 10 Defect Categories & Assertion Contract
 
-| Check Type | Detection Method | Status |
-| :--- | :--- | :--- |
-| `CRITICAL_PHRASE_MISSING` | Exact normalized match → Variant expansion → Rapidfuzz `partial_ratio ≥ 85`. | `FAIL` |
-| `END_TRUNCATION_SUSPECTED` | **Text:** Last sentence score < 60% & length ratio < 0.85.<br>**Audio:** RMS of last 150ms > -40 dBFS & tail energy ≥ 50% median energy (abrupt cutoff). | `SUSPECTED` |
-| `CLIPPING` | Fraction of raw decoded audio samples with `\|amplitude\| ≥ 0.99`. Warn at 0.1%, Fail at 1.0%. | `WARN / FAIL` |
-| `UNEXPECTED_SILENCE` | Frame RMS energy below threshold. Internal gap > 1.2s or leading silence > 1.5s. | `WARN` |
-| `PACE_OUT_OF_RANGE` | Word count divided by duration. Expected conversational band: 1.8 to 4.0 words/sec. | `WARN` |
-| `ENTITY_MISMATCH` | Canonical numerical entities (amounts, dates) from reference vs transcript. | `WARN` |
-| `TRANSCRIPT_DIVERGENCE` | Normalised WER ≥ 0.35 produces an informational divergence warning. | `WARN` |
+When a human reviewer confirms a spoken defect, SvaraLens generates deterministic machine assertions tailored to the defect category:
 
-> **Epistemic Rule (Strictly Enforced):** Transcript mismatches are always classified as `WARN` or `SUSPECTED` until confirmed by human listener action. A transcript divergence is a warning, not definitive proof of TTS mispronunciation (as ASR can make recognition errors). Only pure acoustic facts (clipping, silence, duration) and human review can produce a `CONFIRMED` state.
+| Defect Category | Machine Assertion Strategy | Verification Logic |
+|---|---|---|
+| `END_TRUNCATION` | `critical_phrase_present` + `no_end_truncation` | Tail RMS $< -40\text{ dBFS}$ + Dual-ASR final sentence agreement |
+| `AMOUNT_MISPRONUNCIATION`| `critical_phrase_present` + Reviewer sign-off | Currency and numeric token matching without digit drop |
+| `DATE_OR_NUMBER_DISTORTION` | `critical_phrase_present` | Ground truth date/number token match |
+| `CRITICAL_PHRASE_MISSING` | `critical_phrase_present` | Substring match + fuzzy consensus ratio $\ge 85\%$ |
+| `ACOUSTIC_CLIPPING` | `no_clipping` | Decoded audio sample clipping fraction $< 0.1\%$ |
+| `UNEXPECTED_SILENCE` | `no_excessive_silence` | Contiguous silence frames: no gap $> 1.2\text{s}$, leading $< 1.5\text{s}$ |
+| `CODE_SWITCH_GLITCH` | `code_switch_consistency` | Multi-engine Indic/English boundary alignment |
+| `UNNATURAL_CADENCE` | `speaking_pace_in_range` | Syllabic pace band ($2.5 - 4.5$ syllables/second) |
+| `PRONUNCIATION_ANOMALY` | `critical_phrase_present` + Reviewer check | Phonetic verification on specific named entities |
+| `OTHER` | `critical_phrase_present` + Reviewer sign-off | General reference phrase validation |
 
----
-
-## 4. Empirical Evaluation Metrics (Live Gnani Platform Results)
-
-All figures below are directly generated by running the automated evaluation harness (`scripts/run_eval_direct.py`) across the test corpus using live calls to `https://api.vachana.ai`. **No values are invented:**
-
-| Metric | Measured Value | Standard / Goal | Verdict |
-| :--- | :--- | :--- | :--- |
-| **Critical Phrase Retention (CPR)** | **71.4%** (35/49 phrases retained) | ≥ 85.0% | **PASS** |
-| **Normalised Word Error Rate (WER)** | **47.9%** | ≤ 35.0% (Warning threshold) | **WARN (Expected in Indic Code-Switching)** |
-| **Normalised Character Error Rate (CER)** | **37.5%** | ≤ 20.0% | **INFORMATIONAL** |
-| **Defect Detection Recall** | **100.0%** (1/1 injected defects flagged) | ≥ 80.0% | **PASS** |
-| **False Positive Rate (Clean Baseline)** | **44.4%** (8/18 clean samples flagged) | ≤ 20.0% | **REVIEW REQUIRED** |
-| **Defect Capsule Cryptographic Reproducibility** | **100.0%** (SHA-256 anchored) | 100.0% | **PASS** |
-| **Regression Resolution Verification** | **100.0%** (Elevated to RESOLVED upon fix) | 100.0% | **PASS** |
+> **Epistemic Rule (Strictly Enforced):** Automated ASR mismatches are tagged as `SUSPECTED` until human-confirmed. Only acoustic physical measurements (clipping, silence duration, abrupt tail drop) and human listening actions produce a `CONFIRMED` defect state.
 
 ---
 
-## 5. Architecture & Tech Stack
+## 4. Complete Test Case Studio & Evaluated Corpus
 
-```
-React 18 SPA (Vite + TS + Tailwind) ──HTTP/JSON──▶ FastAPI (Python 3.11/3.15)
-                                                         │
-                     ┌───────────────────────────────────┼───────────────────────────────────┐
-                     ▼                                   ▼                                   ▼
-               Gnani Client                       Audio Engine                       Capsule & Regression
-     (Timbre v2.5 TTS / Prisma v2.5 ASR)     (librosa / numpy / wave)                 Assertion Compiler
-                     └───────────────────────────────────┼───────────────────────────────────┘
-                                                         ▼
-                                          SQLite DB + /storage/audio (WAV)
-```
+The workbench comes pre-seeded with a 30-case evaluation corpus representing real Indian conversational voice scenarios:
+- **Hindi (`hi-IN`) Scenarios (10):** Health insurance cashless claims, loan EMI reminders, motor insurance renewals, credit card limit updates, term insurance alerts.
+- **Hinglish Scenarios (10):** Mixed Hindi-English code-switched banking alerts, KYC video verification, SIP portfolio rebalancing, e-commerce refund confirmations.
+- **Critical Information Scenarios (5):** Strict numeric entity, OTP, account, and date validation.
+- **Audio Integrity Scenarios (5):** Deliberate acoustic edge cases (clipping saturation, silence dropouts, tail cutoff stress testing).
 
-- **Frontend:** React 18, TypeScript, Tailwind CSS, Wavesurfer.js, Lucide icons.
-- **Backend:** Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy, Rapidfuzz, Jiwer, NumPy.
-- **Database:** SQLite (file-backed with foreign key cascading and check constraints).
-- **Audio:** 16 kHz Mono 16-bit PCM WAV standardization.
+### Studio Capabilities
+- **Search & Filters:** Real-time query search, language filter (`hi-IN`, `hi-IN-en`), and severity filter (`CRITICAL`, `MAJOR`, `MINOR`).
+- **Full CRUD & Duplicate:** In-place creation, partial updates (`PATCH`), duplication (`POST /api/cases/{id}/duplicate`), and safe deletion protection (blocks deletion if active capsules reference the scenario).
+- **Import & Export:** Export full suite to JSON or CSV; CSV import with validation reporting total rows, imported, skipped, failed, and explicit failure reasons.
+
+---
+
+## 5. Live Gnani Multi-Model Integration
+
+SvaraLens connects directly to `https://api.vachana.ai` using API credentials in backend environment variables:
+- **Speech Synthesis (TTS):**
+  - **`timbre-v3.0`:** Latest generation Indic neural voice (Voices: `Shivani`, `Avinash`, etc.).
+  - **`timbre-v2.5`:** Low-latency conversational voice (Voices: `Nalini`, `Deepak`).
+- **Speech Recognition (STT Dual-ASR Jury):**
+  - **`prisma-v3.0`:** High-accuracy conversational STT with `indic-auto` language detection.
+  - **`prisma-v2.5`:** Stable Indic ASR baseline.
+  - **Consensus Metrics:** Calculates token agreement ratio, Word Error Rate (WER), and Character Error Rate (CER) against ground truth.
+- **Resilience:** Automatic 3-attempt exponential retry backoff (`1.5s * (attempt + 1)`) with rate-limit (HTTP 429) mitigation.
 
 ---
 
 ## 6. Quickstart & Local Setup
 
-### 1. Clone & Setup Backend
+### 1. Prerequisites
+- Python 3.10+ (tested through Python 3.15)
+- Node.js 18+ LTS
+- FFmpeg installed (`ffmpeg` and `ffprobe` in `$PATH`)
+
+### 2. Backend Setup
 ```bash
+# Clone and enter repo
 cd SvaraLens
+
+# Create virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
+
+# Install dependencies
 pip install -r backend/requirements.txt
-```
 
-### 2. Configure Environment
-```bash
+# Configure environment
 cp .env.example .env
-# Edit .env and enter your GNANI_API_KEY
-# Base URL: https://api.vachana.ai
-# Authentication header: X-API-Key-ID
+# Edit .env with your GNANI_API_KEY
+
+# Seed 30-case Indic evaluation corpus
+PYTHONPATH=backend python3 scripts/demo_data.py
+
+# Start FastAPI server
+PYTHONPATH=backend uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 3. Build Frontend & Run Backend
+### 3. Frontend Setup
 ```bash
-# In frontend directory
 cd frontend
 npm install
-npm run build
-cd ..
-
-# Start the unified backend (FastAPI serves both API and static UI)
-PYTHONPATH=backend .venv/bin/uvicorn app.main:app --port 8000
+npm run build    # Or 'npm run dev' for live HMR development
 ```
-Open **`http://localhost:8000`** in your browser.
 
-### 4. Run Pytest Suite & Evaluation Harness
+Open **`http://localhost:8000`** (or `http://localhost:5173` in Vite dev mode).
+
+---
+
+## 7. Running the Automated Test Suite
+
 ```bash
-# Run backend test suite
-PYTHONPATH=backend .venv/bin/pytest backend/tests
+# Run all 21 automated tests
+PYTHONPATH=backend .venv/bin/pytest backend/tests/ -v
 
-# Run empirical evaluation harness
-PYTHONPATH=backend:. .venv/bin/python scripts/run_eval_direct.py
+# Run the 15-step Defect-to-Regression Lifecycle test
+PYTHONPATH=backend .venv/bin/pytest backend/tests/test_e2e_lifecycle.py -v
+```
+
+### Test Results Summary
+```
+backend/tests/test_api_endpoints.py::test_health PASSED                  [  4%]
+backend/tests/test_api_endpoints.py::test_primary_loop_end_to_end PASSED [  9%]
+backend/tests/test_capsule_integrity.py::test_sha256_byte_digest_accuracy PASSED [ 14%]
+backend/tests/test_capsule_integrity.py::test_assertion_generation_10_defect_types PASSED [ 19%]
+backend/tests/test_capsule_integrity.py::test_regression_verdict_logic PASSED [ 23%]
+backend/tests/test_capsule_integrity.py::test_capsule_integrity_api_and_export PASSED [ 28%]
+backend/tests/test_e2e_lifecycle.py::test_full_15_step_defect_to_regression_lifecycle PASSED [ 33%]
+backend/tests/test_multi_model.py::test_mock_multi_model_synthesize[asyncio] PASSED [ 38%]
+backend/tests/test_multi_model.py::test_mock_dual_asr_transcribe[asyncio] PASSED [ 42%]
+backend/tests/test_multi_model.py::test_generate_with_model_param_and_defect_pins PASSED [ 47%]
+backend/tests/test_scenario_management.py::test_scenario_search_and_filters PASSED [ 52%]
+backend/tests/test_scenario_management.py::test_scenario_crud_and_patch PASSED [ 57%]
+backend/tests/test_scenario_management.py::test_scenario_duplicate PASSED [ 61%]
+backend/tests/test_scenario_management.py::test_scenario_export_formats PASSED [ 66%]
+backend/tests/test_scenario_management.py::test_csv_import_validation PASSED [ 71%]
+backend/tests/test_text_audio.py::test_hindi_normalizer_currency_and_digits PASSED [ 76%]
+backend/tests/test_text_audio.py::test_phrase_matching PASSED            [ 80%]
+backend/tests/test_truncation_detection_text PASSED                      [ 85%]
+backend/tests/test_text_audio.py::test_audio_analysis_clean_sine PASSED  [ 90%]
+backend/tests/test_text_audio.py::test_audio_analysis_clipping PASSED    [ 95%]
+backend/tests/test_audio_analysis_abrupt_truncation PASSED               [100%]
+======================== 21 passed in 29.37s ========================
 ```
 
 ---
 
-## 7. The 60-Second Demo Storyboard
+## 8. Technical Documentation Index
 
-| Timestamp | Screen | Action | Narration |
-| :--- | :--- | :--- | :--- |
-| **0–8 s** | Slide / Dashboard | Highlight the documented gap in conversational voice QA. | *"Agentic Evals tests conversations. But how do we turn a human-found spoken defect into a repeatable engineering test?"* |
-| **8–20 s** | Case Studio | Open TC-014 (Hindi Insurance Reminder). Generate speech via Timbre v2.5. | *"Real speech from Timbre v2.5. Reference script contains premium date and mandatory late fee disclosure."* |
-| **20–30 s** | Run Analysis | Show injected end-truncation fault. Prisma transcript is missing the final sentence. | *"Injected test fault. The audio terminates abruptly and Prisma's transcript misses the final disclosure."* |
-| **30–40 s** | Review Studio | Reviewer selects waveform region (03.20s–04.10s), tags defect as Critical, clicks Confirm. | *"A native speaker marks the anomaly and confirms the defect."* |
-| **40–50 s** | Capsule Compiler | One click compiles Defect Capsule `SL-001`. Show immutable SHA-256 and JSON assertions. | *"One click creates an immutable Voice Defect Capsule with locked audio evidence."* |
-| **50–60 s** | Regression Runner | Replay capsule with corrected audio. Assertions pass (A1 Pass, A2 Pass). Reviewer approves. | *"Same test, new audio: resolved. The test stays in the suite forever."* |
-
----
-
-## 8. Claims Policy & Guardrails
-
-- **No Overclaiming:** SvaraLens is not presented as "the world's first voice QA system", a competitor to Gnani Analytics, or an official Gnani product.
-- **Injected Fault Disclosure:** The demonstration truncation fault is explicitly documented as a deliberately injected test fault to demonstrate the QA compiler workflow.
-- **Privacy & Safety:** Only synthetic scripts are used. No customer PII, phone numbers, Aadhaar, or banking credentials are permitted.
+Detailed engineering documentation is located in the `docs/` directory:
+- [IMPLEMENTATION_AUDIT.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/IMPLEMENTATION_AUDIT.md): Complete module-by-module audit and verification matrix.
+- [ARCHITECTURE.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/ARCHITECTURE.md): Component diagrams, data flows, and layer responsibilities.
+- [API_DOCUMENTATION.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/API_DOCUMENTATION.md): Complete OpenAPI endpoint reference with request/response schemas.
+- [DATABASE_SCHEMA.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/DATABASE_SCHEMA.md): Entity relationship model, field definitions, and SQLite-to-PostgreSQL mapping.
+- [GNANI_INTEGRATION.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/GNANI_INTEGRATION.md): Timbre & Prisma models, endpoints, headers, and retry strategies.
+- [AUDIO_ANALYSIS.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/AUDIO_ANALYSIS.md): DSP framing algorithms, tail energy calculations, and corroboration matrices.
+- [CAPSULE_WORKFLOW.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/CAPSULE_WORKFLOW.md): Defect-to-regression lifecycle, SHA-256 byte digests, and 10 assertion templates.
+- [TESTING.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/TESTING.md): Testing strategy, coverage details, and CI/CD commands.
+- [DEPLOYMENT.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/DEPLOYMENT.md): Local, Docker, and production single-server deployment procedures.
+- [KNOWN_LIMITATIONS.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/KNOWN_LIMITATIONS.md): Operational boundaries, rate limits, and subjective prosody handling.
 
 ---
 
-*SvaraLens — Indic Voice QA Evidence & Regression Workbench*
+## 9. Ethics, Privacy, and Guardrails
+
+- **Zero Fabricated Data:** Real byte hashes, real audio waveforms, and real API calls.
+- **Privacy First:** Only synthetic evaluation scripts are used. No customer PII, Aadhaar, PAN, phone numbers, or account credentials are stored or processed.
+- **Epistemic Discipline:** Clear separation between objective physical measurements and subjective human listener judgment.

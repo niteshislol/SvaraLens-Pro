@@ -103,9 +103,10 @@ class MockGnaniClient(GnaniClientProtocol):
     async def transcribe_dual_asr(
         self,
         audio_path: str,
-        language: str = "hi-IN"
+        language: str = "hi-IN",
+        reference_text: Optional[str] = None
     ) -> Dict[str, Any]:
-        t_res = await self.transcribe(audio_path, language=language)
+        t_res = await self.transcribe(audio_path, language=language, reference_text=reference_text)
         return {
             "primary_result": t_res,
             "primary_text": t_res.text,

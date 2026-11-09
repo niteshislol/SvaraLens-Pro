@@ -61,7 +61,7 @@ def build_assertions_for_defect(defect_type: str, finding_evidence: Dict[str, An
             "description": "QA reviewer must verify accurate pronunciation."
         })
 
-    elif defect_type == "CLIPPING":
+    elif defect_type in ("CLIPPING", "ACOUSTIC_CLIPPING"):
         assertions.append({
             "id": "A1",
             "type": "no_clipping",
@@ -72,6 +72,74 @@ def build_assertions_for_defect(defect_type: str, finding_evidence: Dict[str, An
             "id": "A2",
             "type": "reviewer_approval_required",
             "description": "QA reviewer must confirm clear audio free of digital distortion."
+        })
+
+    elif defect_type == "AMOUNT_MISPRONUNCIATION":
+        amt = finding_evidence.get("amount") or finding_evidence.get("phrase", "")
+        assertions.append({
+            "id": "A1",
+            "type": "critical_phrase_present",
+            "phrase": amt,
+            "description": f"Mandatory monetary amount '{amt}' must be audibly articulated without digit distortion."
+        })
+        assertions.append({
+            "id": "A2",
+            "type": "reviewer_approval_required",
+            "description": "Native language reviewer must verify exact currency and numerical pronunciation."
+        })
+
+    elif defect_type == "DATE_OR_NUMBER_DISTORTION":
+        num_phrase = finding_evidence.get("number") or finding_evidence.get("phrase", "")
+        assertions.append({
+            "id": "A1",
+            "type": "critical_phrase_present",
+            "phrase": num_phrase,
+            "description": f"Date or numerical token '{num_phrase}' must match ground truth reference."
+        })
+        assertions.append({
+            "id": "A2",
+            "type": "reviewer_approval_required",
+            "description": "QA reviewer must verify accurate calendar date/number delivery."
+        })
+
+    elif defect_type == "UNNATURAL_CADENCE":
+        assertions.append({
+            "id": "A1",
+            "type": "speaking_pace_in_range",
+            "min_pace": test_case.pace_min,
+            "max_pace": test_case.pace_max,
+            "description": f"Speaking pace must fall within benchmark [{test_case.pace_min}, {test_case.pace_max}] syllables/sec."
+        })
+        assertions.append({
+            "id": "A2",
+            "type": "reviewer_approval_required",
+            "description": "Reviewer must evaluate cadence, natural micro-pauses, and sentence rhythm."
+        })
+
+    elif defect_type == "CODE_SWITCH_GLITCH":
+        assertions.append({
+            "id": "A1",
+            "type": "code_switch_consistency",
+            "description": "Code-switched transitions between Hindi and English words must maintain smooth voice timbre."
+        })
+        assertions.append({
+            "id": "A2",
+            "type": "reviewer_approval_required",
+            "description": "Bilingual reviewer must confirm natural code-switching without abrupt pitch or volume jumps."
+        })
+
+    elif defect_type == "PRONUNCIATION_ANOMALY":
+        token = finding_evidence.get("phrase") or finding_evidence.get("token", "")
+        assertions.append({
+            "id": "A1",
+            "type": "critical_phrase_present",
+            "phrase": token,
+            "description": f"Term '{token}' must be pronounced in accordance with native Indic phonology."
+        })
+        assertions.append({
+            "id": "A2",
+            "type": "reviewer_approval_required",
+            "description": "Native Indic reviewer must confirm standard pronunciation without dialectal distortion."
         })
 
     elif defect_type == "UNEXPECTED_SILENCE":

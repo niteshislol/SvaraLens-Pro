@@ -4,7 +4,7 @@ import {
   fetchTestCases, fetchRun, triggerGenerateRun, uploadAudioRun,
   createTestCase, importCasesCsv, addDefectPin, removeDefectPin,
   updateFinding, compileCapsule, rerunRegression, approveRegression,
-  getAudioUrl
+  getAudioUrl, duplicateTestCase, validateCapsuleIntegrity
 } from '../api/client';
 import { ProWaveformPlayer } from '../components/ProWaveformPlayer';
 import { ModelArenaSelector, V3_PERSONAS, V25_PERSONAS } from '../components/ModelArenaSelector';
@@ -15,7 +15,8 @@ import { BeforeAfterTable } from '../components/BeforeAfterTable';
 import {
   Play, Plus, Upload, Sparkles, Pin, ShieldCheck, CheckCircle2,
   AlertTriangle, Activity, Volume2, ArrowRight, Loader2, Gauge,
-  FileText, Check, Clock, RefreshCw, Layers, Search, X, Wand2
+  FileText, Check, Clock, RefreshCw, Layers, Search, X, Wand2,
+  Copy, Download
 } from 'lucide-react';
 
 interface ProWorkbenchProps {
@@ -298,6 +299,30 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
     }
   };
 
+  const [hashStatus, setHashStatus] = useState<{ checked: boolean; valid: boolean; computed?: string } | null>(null);
+
+  const handleDuplicateCase = async () => {
+    if (!activeCase) return;
+    try {
+      const dup = await duplicateTestCase(activeCase.id);
+      await loadCases();
+      setSelectedCaseId(dup.id);
+      alert(`Scenario duplicated successfully as ${dup.id}!`);
+    } catch (err) {
+      alert(`Failed to duplicate scenario: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const handleValidateHash = async () => {
+    if (!activeCapsule) return;
+    try {
+      const res = await validateCapsuleIntegrity(activeCapsule.id);
+      setHashStatus({ checked: true, valid: res.valid, computed: res.computed_sha256 });
+    } catch (err) {
+      alert(`Hash validation failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
   // Filtered cases list
   const filteredCases = cases.filter(c => {
     const matchesSearch = c.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -333,6 +358,15 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
                 {csvUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
                 <input type="file" accept=".csv" onChange={handleCsvImport} disabled={csvUploading} className="hidden" />
               </label>
+
+              <a
+                href="/api/cases/export?format=csv"
+                download="test_cases.csv"
+                title="Export Cases CSV"
+                className="p-1.5 rounded-lg bg-[#171C26] hover:bg-[#222938] text-[#94A3B8] hover:text-white border border-[#222938] transition-colors"
+              >
+                <Download className="w-3.5 h-3.5 text-[#2FBF71]" />
+              </a>
 
               <button
                 onClick={() => setShowNewCaseModal(true)}
@@ -440,9 +474,20 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
                   </span>
                 </div>
 
-                <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#EF4444] font-bold">
-                  {activeCase.severity} SEVERITY
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#EF4444] font-bold">
+                    {activeCase.severity} SEVERITY
+                  </span>
+
+                  <button
+                    onClick={handleDuplicateCase}
+                    title="Duplicate Scenario"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono rounded bg-[#171C26] hover:bg-[#222938] text-[#94A3B8] hover:text-[#F3F4F6] border border-[#222938] transition-colors"
+                  >
+                    <Copy className="w-3 h-3 text-[#4F8CFF]" />
+                    <span>Duplicate</span>
+                  </button>
+                </div>
               </div>
 
               <h1 className="text-base font-bold text-[#F3F4F6]">{activeCase.scenario}</h1>
@@ -700,7 +745,22 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
 
                   <div className="text-[11px] font-mono text-[#94A3B8] space-y-1">
                     <div>Defect: <strong className="text-[#F3F4F6]">{activeCapsule.defect_type}</strong></div>
-                    <div className="truncate">Audio Digest: <span className="text-[#64748B]">{activeCapsule.failing_audio_sha256.slice(0, 20)}...</span></div>
+                    <div className="flex items-center justify-between">
+                      <div className="truncate">Digest: <span className="text-[#64748B]">{activeCapsule.failing_audio_sha256.slice(0, 16)}...</span></div>
+                      <button
+                        onClick={handleValidateHash}
+                        className="px-2 py-0.5 rounded bg-[#080A0E] hover:bg-[#222938] text-[10px] text-[#4F8CFF] border border-[#4F8CFF]/30 transition-colors"
+                      >
+                        Verify Hash
+                      </button>
+                    </div>
+                    {hashStatus?.checked && (
+                      <div className={`p-1.5 rounded text-[10px] font-mono border ${
+                        hashStatus.valid ? 'bg-[#10B981]/15 text-[#10B981] border-[#10B981]/30' : 'bg-[#EF4444]/15 text-[#EF4444] border-[#EF4444]/30'
+                      }`}>
+                        {hashStatus.valid ? '✓ SHA-256 Verified (Matches audio file bytes on disk)' : '✗ Hash Mismatch or File Missing'}
+                      </div>
+                    )}
                   </div>
 
                   {/* Assertions Contract */}

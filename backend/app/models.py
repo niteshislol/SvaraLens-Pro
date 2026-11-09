@@ -24,13 +24,18 @@ class TestCase(Base):
     id = Column(String, primary_key=True)  # TC-001, TC-014, etc.
     suite_id = Column(String, ForeignKey("suites.id", ondelete="CASCADE"), nullable=False)
     scenario = Column(String, nullable=False)
+    title = Column(String, nullable=True)
+    description = Column(Text, nullable=True)
     language = Column(String, nullable=False)  # 'hi-IN' or 'hinglish'
+    dialect = Column(String, default="standard", nullable=True)
     reference_text = Column(Text, nullable=False)
     critical_phrases_json = Column(Text, nullable=False)  # JSON list of [{text, variants[], severity}]
+    critical_entities_json = Column(Text, nullable=True)  # JSON list of entities
     voice = Column(String, default="Shivani", nullable=True)
     tts_model = Column(String, default="timbre-v3.0", nullable=True)
     speed = Column(Float, default=1.0, nullable=False)
     channel = Column(String, default="standard", nullable=False)  # 'standard' or 'tel_8k'
+    sample_rate = Column(Integer, default=16000, nullable=True)
     pace_min = Column(Float, default=1.8, nullable=False)
     pace_max = Column(Float, default=4.0, nullable=False)
     severity = Column(String, nullable=False)  # 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'
@@ -113,6 +118,9 @@ class Review(Base):
     id = Column(String, primary_key=True)
     run_id = Column(String, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
     reviewer = Column(Text, nullable=False)
+    reviewer_role = Column(String, default="PRIMARY", nullable=False)  # 'PRIMARY' or 'SECOND_REVIEWER'
+    consensus_status = Column(String, default="AGREED", nullable=False)  # 'AGREED', 'DISPUTED', 'PENDING'
+    review_status = Column(String, default="CONFIRMED", nullable=False)  # 'CONFIRMED', 'REJECTED', 'NEEDS_SECOND_REVIEW'
     ratings_json = Column(Text, nullable=True)  # {pronunciation, naturalness, clarity, prosody, code_switching, delivery}: 1-5 or null
     created_at = Column(String, default=utcnow_iso, nullable=False)
 
@@ -182,4 +190,15 @@ class EvalResult(Base):
     expected_defect = Column(Text, nullable=True)
     detected_defects_json = Column(Text, nullable=True)
     is_clean = Column(Integer, default=0, nullable=False)
+    created_at = Column(String, default=utcnow_iso, nullable=False)
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id = Column(String, primary_key=True)
+    entity_type = Column(String, nullable=False)  # 'CASE', 'RUN', 'CAPSULE', 'REGRESSION', 'REVIEW'
+    entity_id = Column(String, nullable=False)
+    action = Column(String, nullable=False)  # 'CREATE', 'UPDATE', 'DELETE', 'COMPILE', 'RERUN', 'APPROVE', 'REOPEN', 'IMPORT'
+    actor = Column(String, default="System", nullable=False)
+    details_json = Column(Text, nullable=True)
     created_at = Column(String, default=utcnow_iso, nullable=False)

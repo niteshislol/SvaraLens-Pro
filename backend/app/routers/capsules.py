@@ -7,9 +7,10 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
 from ..db import get_db
-from ..models import Capsule, RegressionRun, Run, TestCase, Finding
+from ..models import Capsule, RegressionRun, Run, TestCase, Finding, AuditEvent
 from ..schemas import (
-    CapsuleRead, RegressionRunRead, RegressionApproveRequest, AssertionComparison
+    CapsuleRead, RegressionRunRead, RegressionApproveRequest, AssertionComparison,
+    CapsuleIntegrityResponse
 )
 from ..config import settings
 from ..gnani.mock import get_gnani_client
@@ -65,6 +66,70 @@ def get_capsule(id: str, db: Session = Depends(get_db)):
         state=c.state,
         created_at=c.created_at
     )
+
+@router.get("/{id}/validate", response_model=CapsuleIntegrityResponse)
+def validate_capsule_integrity(id: str, db: Session = Depends(get_db)):
+    """
+    Validates SHA-256 integrity using actual file bytes on disk per Section 10 of Master Build Document.
+    Recomputes hash and verifies against immutable locked specification.
+    """
+    c = db.query(Capsule).filter(Capsule.id == id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Capsule not found")
+    
+    spec = json.loads(c.spec_json) if c.spec_json else {}
+    audio_path = spec.get("audio_file_path")
+    
+    if not audio_path or not Path(audio_path).exists():
+        finding = c.source_finding
+        if finding and finding.run and finding.run.audio_path and Path(finding.run.audio_path).exists():
+            audio_path = finding.run.audio_path
+    
+    if not audio_path or not Path(audio_path).exists():
+        return CapsuleIntegrityResponse(
+            capsule_id=c.id,
+            valid=False,
+            expected_sha256=c.failing_audio_sha256,
+            computed_sha256="FILE_NOT_FOUND_ON_DISK",
+            audio_path=audio_path,
+            verified_at=datetime.now(timezone.utc).isoformat()
+        )
+
+    computed_hash = compute_sha256(audio_path)
+    is_valid = (computed_hash == c.failing_audio_sha256)
+    
+    return CapsuleIntegrityResponse(
+        capsule_id=c.id,
+        valid=is_valid,
+        expected_sha256=c.failing_audio_sha256,
+        computed_sha256=computed_hash,
+        audio_path=audio_path,
+        verified_at=datetime.now(timezone.utc).isoformat()
+    )
+
+@router.get("/{id}/export")
+def export_capsule_json(id: str, db: Session = Depends(get_db)):
+    """
+    Exports structured Voice Defect Capsule JSON representation.
+    """
+    c = db.query(Capsule).filter(Capsule.id == id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Capsule not found")
+    spec = json.loads(c.spec_json) if c.spec_json else {}
+    pins = json.loads(c.defect_pins_json) if getattr(c, "defect_pins_json", None) else []
+    return {
+        "capsule_id": c.id,
+        "case_id": c.case_id,
+        "defect_type": c.defect_type,
+        "severity": c.severity,
+        "state": c.state,
+        "review_status": c.review_status,
+        "failing_audio_sha256": c.failing_audio_sha256,
+        "defect_pins": pins,
+        "regression_spec": spec,
+        "created_at": c.created_at,
+        "schema_version": "1.0.0"
+    }
 
 @router.post("/{id}/rerun", response_model=RegressionRunRead)
 async def rerun_capsule_regression(

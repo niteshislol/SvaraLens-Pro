@@ -193,3 +193,57 @@ export async function addReview(runId: string, reviewData: any): Promise<Review>
   if (!res.ok) throw new Error('Failed to add review');
   return res.json();
 }
+
+export async function duplicateTestCase(caseId: string): Promise<TestCase> {
+  const res = await fetch(`${API_BASE}/cases/${caseId}/duplicate`, {
+    method: 'POST'
+  });
+  if (!res.ok) throw new Error('Failed to duplicate test case');
+  return res.json();
+}
+
+export async function deleteTestCase(caseId: string, force: boolean = false): Promise<{ status: string; id: string }> {
+  const res = await fetch(`${API_BASE}/cases/${caseId}?force=${force}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to delete test case');
+  }
+  return res.json();
+}
+
+export async function validateCapsuleIntegrity(capsuleId: string): Promise<{
+  capsule_id: string;
+  valid: boolean;
+  expected_sha256: string;
+  computed_sha256: string;
+  audio_path?: string;
+  verified_at: string;
+}> {
+  const res = await fetch(`${API_BASE}/capsules/${capsuleId}/validate`);
+  if (!res.ok) throw new Error('Failed to validate capsule integrity');
+  return res.json();
+}
+
+export async function fetchSuiteAnalytics(suiteId: string = 'suite-insurance-hi'): Promise<{
+  suite_id: string;
+  total_scenarios: number;
+  total_runs: number;
+  language_distribution: Record<string, number>;
+  severity_distribution: Record<string, number>;
+  defects_by_category: Record<string, number>;
+  dual_asr_average_consensus: number;
+  open_capsules_count: number;
+  resolved_capsules_count: number;
+  release_readiness: {
+    status: string;
+    is_approved: boolean;
+    blockers_count: number;
+    blockers: string[];
+  };
+}> {
+  const res = await fetch(`${API_BASE}/analytics/suite/${suiteId}`);
+  if (!res.ok) throw new Error('Failed to fetch suite analytics');
+  return res.json();
+}

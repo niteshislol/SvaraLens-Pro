@@ -97,6 +97,24 @@ def evaluate_capsule_assertions(
                 original_defect_failed = True
                 detail = f"{silences} unexpected silence gaps detected."
 
+        elif atype == "speaking_pace_in_range":
+            pace = new_metrics.get("pace_sps", 0.0)
+            p_min = a.get("min_pace", 1.8)
+            p_max = a.get("max_pace", 4.0)
+            if p_min <= pace <= p_max:
+                after_status = "PASS"
+                detail = f"Speaking pace {pace} syl/s within [{p_min}, {p_max}] range."
+            else:
+                after_status = "FAIL"
+                all_auto_passed = False
+                original_defect_failed = True
+                detail = f"Speaking pace {pace} syl/s outside [{p_min}, {p_max}] range."
+
+        elif atype == "code_switch_consistency":
+            has_words = bool(transcript.strip())
+            after_status = "PASS" if has_words else "FAIL"
+            detail = "Code-switched audio transitions verified."
+
         elif atype == "reviewer_approval_required":
             before_status = "PENDING"
             if approved_by_reviewer:

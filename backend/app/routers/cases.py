@@ -30,26 +30,49 @@ def get_next_case_id(db: Session) -> str:
     return f"TC-{i:03d}"
 
 @router.get("", response_model=List[TestCaseRead])
-def list_test_cases(suite_id: Optional[str] = None, db: Session = Depends(get_db)):
+def list_test_cases(
+    suite_id: Optional[str] = None,
+    search: Optional[str] = None,
+    language: Optional[str] = None,
+    severity: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
     query = db.query(TestCase)
     if suite_id:
         query = query.filter(TestCase.suite_id == suite_id)
+    if language and language != "ALL":
+        query = query.filter(TestCase.language == language)
+    if severity and severity != "ALL":
+        query = query.filter(TestCase.severity == severity)
+    if search:
+        search_filter = f"%{search.strip()}%"
+        query = query.filter(
+            (TestCase.id.ilike(search_filter)) |
+            (TestCase.scenario.ilike(search_filter)) |
+            (TestCase.reference_text.ilike(search_filter))
+        )
     cases = query.order_by(TestCase.id).all()
     
     results = []
     for c in cases:
         critical_phrases = json.loads(c.critical_phrases_json) if c.critical_phrases_json else []
+        critical_entities = json.loads(c.critical_entities_json) if getattr(c, "critical_entities_json", None) else None
         results.append(TestCaseRead(
             id=c.id,
             suite_id=c.suite_id,
             scenario=c.scenario,
+            title=getattr(c, "title", None) or c.scenario,
+            description=getattr(c, "description", None),
             language=c.language,
+            dialect=getattr(c, "dialect", "standard") or "standard",
             reference_text=c.reference_text,
             critical_phrases=critical_phrases,
+            critical_entities=critical_entities,
             voice=c.voice or "Shivani",
             tts_model=getattr(c, "tts_model", "timbre-v3.0") or "timbre-v3.0",
             speed=c.speed,
             channel=c.channel,
+            sample_rate=getattr(c, "sample_rate", 16000) or 16000,
             pace_min=c.pace_min,
             pace_max=c.pace_max,
             severity=c.severity,
@@ -58,6 +81,51 @@ def list_test_cases(suite_id: Optional[str] = None, db: Session = Depends(get_db
             updated_at=c.updated_at
         ))
     return results
+
+@router.get("/export")
+def export_test_cases(
+    suite_id: Optional[str] = Query(None),
+    format: str = Query("json", pattern="^(json|csv)$"),
+    db: Session = Depends(get_db)
+):
+    """
+    Exports test scenarios as JSON or CSV per Section 5 of Master Build Document.
+    """
+    query = db.query(TestCase)
+    if suite_id:
+        query = query.filter(TestCase.suite_id == suite_id)
+    cases = query.order_by(TestCase.id).all()
+
+    if format == "json":
+        data = []
+        for c in cases:
+            data.append({
+                "id": c.id,
+                "suite_id": c.suite_id,
+                "scenario": c.scenario,
+                "language": c.language,
+                "reference_text": c.reference_text,
+                "critical_phrases": json.loads(c.critical_phrases_json) if c.critical_phrases_json else [],
+                "voice": c.voice,
+                "tts_model": getattr(c, "tts_model", "timbre-v3.0"),
+                "channel": c.channel,
+                "severity": c.severity
+            })
+        return data
+    else:
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["scenario", "language", "reference_text", "critical_phrases", "severity"])
+        for c in cases:
+            phrases = json.loads(c.critical_phrases_json) if c.critical_phrases_json else []
+            phrase_str = "|".join([p.get("text", "") for p in phrases])
+            writer.writerow([c.scenario, c.language, c.reference_text, phrase_str, c.severity])
+        from fastapi.responses import Response
+        return Response(
+            content=output.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=test_cases.csv"}
+        )
 
 @router.post("", response_model=TestCaseRead, status_code=201)
 def create_test_case(case_in: TestCaseCreate, db: Session = Depends(get_db)):
@@ -133,17 +201,23 @@ def get_test_case(id: str, db: Session = Depends(get_db)):
     if not c:
         raise HTTPException(status_code=404, detail="Test case not found")
     critical_phrases = json.loads(c.critical_phrases_json) if c.critical_phrases_json else []
+    critical_entities = json.loads(c.critical_entities_json) if getattr(c, "critical_entities_json", None) else None
     return TestCaseRead(
         id=c.id,
         suite_id=c.suite_id,
         scenario=c.scenario,
+        title=getattr(c, "title", None) or c.scenario,
+        description=getattr(c, "description", None),
         language=c.language,
+        dialect=getattr(c, "dialect", "standard") or "standard",
         reference_text=c.reference_text,
         critical_phrases=critical_phrases,
+        critical_entities=critical_entities,
         voice=c.voice or "Shivani",
         tts_model=getattr(c, "tts_model", "timbre-v3.0") or "timbre-v3.0",
         speed=c.speed,
         channel=c.channel,
+        sample_rate=getattr(c, "sample_rate", 16000) or 16000,
         pace_min=c.pace_min,
         pace_max=c.pace_max,
         severity=c.severity,
@@ -152,12 +226,147 @@ def get_test_case(id: str, db: Session = Depends(get_db)):
         updated_at=c.updated_at
     )
 
-@router.delete("/{id}")
-def delete_test_case(id: str, db: Session = Depends(get_db)):
+@router.patch("/{id}", response_model=TestCaseRead)
+def update_test_case(id: str, case_in: TestCaseUpdate, db: Session = Depends(get_db)):
     c = db.query(TestCase).filter(TestCase.id == id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Test case not found")
     
+    if case_in.scenario is not None:
+        c.scenario = case_in.scenario
+    if case_in.title is not None:
+        c.title = case_in.title
+    if case_in.description is not None:
+        c.description = case_in.description
+    if case_in.language is not None:
+        c.language = case_in.language
+    if case_in.dialect is not None:
+        c.dialect = case_in.dialect
+    if case_in.reference_text is not None:
+        c.reference_text = case_in.reference_text
+    if case_in.critical_phrases is not None:
+        c.critical_phrases_json = json.dumps([cp.model_dump() for cp in case_in.critical_phrases], ensure_ascii=False)
+    if case_in.critical_entities is not None:
+        c.critical_entities_json = json.dumps(case_in.critical_entities, ensure_ascii=False)
+    if case_in.voice is not None:
+        c.voice = case_in.voice
+    if case_in.tts_model is not None:
+        c.tts_model = case_in.tts_model
+    if case_in.speed is not None:
+        c.speed = case_in.speed
+    if case_in.channel is not None:
+        c.channel = case_in.channel
+    if case_in.sample_rate is not None:
+        c.sample_rate = case_in.sample_rate
+    if case_in.pace_min is not None:
+        c.pace_min = case_in.pace_min
+    if case_in.pace_max is not None:
+        c.pace_max = case_in.pace_max
+    if case_in.severity is not None:
+        c.severity = case_in.severity
+
+    c.updated_at = datetime.now(timezone.utc).isoformat()
+    db.commit()
+    db.refresh(c)
+
+    critical_phrases = json.loads(c.critical_phrases_json) if c.critical_phrases_json else []
+    critical_entities = json.loads(c.critical_entities_json) if getattr(c, "critical_entities_json", None) else None
+    return TestCaseRead(
+        id=c.id,
+        suite_id=c.suite_id,
+        scenario=c.scenario,
+        title=getattr(c, "title", None) or c.scenario,
+        description=getattr(c, "description", None),
+        language=c.language,
+        dialect=getattr(c, "dialect", "standard") or "standard",
+        reference_text=c.reference_text,
+        critical_phrases=critical_phrases,
+        critical_entities=critical_entities,
+        voice=c.voice or "Shivani",
+        tts_model=getattr(c, "tts_model", "timbre-v3.0") or "timbre-v3.0",
+        speed=c.speed,
+        channel=c.channel,
+        sample_rate=getattr(c, "sample_rate", 16000) or 16000,
+        pace_min=c.pace_min,
+        pace_max=c.pace_max,
+        severity=c.severity,
+        is_synthetic=c.is_synthetic,
+        created_at=c.created_at,
+        updated_at=c.updated_at
+    )
+
+@router.post("/{id}/duplicate", response_model=TestCaseRead, status_code=201)
+def duplicate_test_case(id: str, db: Session = Depends(get_db)):
+    c = db.query(TestCase).filter(TestCase.id == id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Test case not found")
+    
+    new_id = get_next_case_id(db)
+    new_case = TestCase(
+        id=new_id,
+        suite_id=c.suite_id,
+        scenario=f"Copy of {c.scenario}",
+        title=f"Copy of {getattr(c, 'title', None) or c.scenario}",
+        description=getattr(c, "description", None),
+        language=c.language,
+        dialect=getattr(c, "dialect", "standard") or "standard",
+        reference_text=c.reference_text,
+        critical_phrases_json=c.critical_phrases_json,
+        critical_entities_json=getattr(c, "critical_entities_json", None),
+        voice=c.voice,
+        tts_model=getattr(c, "tts_model", "timbre-v3.0"),
+        speed=c.speed,
+        channel=c.channel,
+        sample_rate=getattr(c, "sample_rate", 16000) or 16000,
+        pace_min=c.pace_min,
+        pace_max=c.pace_max,
+        severity=c.severity,
+        is_synthetic=c.is_synthetic
+    )
+    db.add(new_case)
+    db.commit()
+    db.refresh(new_case)
+
+    critical_phrases = json.loads(new_case.critical_phrases_json) if new_case.critical_phrases_json else []
+    critical_entities = json.loads(new_case.critical_entities_json) if new_case.critical_entities_json else None
+    return TestCaseRead(
+        id=new_case.id,
+        suite_id=new_case.suite_id,
+        scenario=new_case.scenario,
+        title=new_case.title,
+        description=new_case.description,
+        language=new_case.language,
+        dialect=new_case.dialect,
+        reference_text=new_case.reference_text,
+        critical_phrases=critical_phrases,
+        critical_entities=critical_entities,
+        voice=new_case.voice or "Shivani",
+        tts_model=new_case.tts_model or "timbre-v3.0",
+        speed=new_case.speed,
+        channel=new_case.channel,
+        sample_rate=new_case.sample_rate or 16000,
+        pace_min=new_case.pace_min,
+        pace_max=new_case.pace_max,
+        severity=new_case.severity,
+        is_synthetic=new_case.is_synthetic,
+        created_at=new_case.created_at,
+        updated_at=new_case.updated_at
+    )
+
+@router.delete("/{id}")
+def delete_test_case(id: str, force: bool = Query(False), db: Session = Depends(get_db)):
+    c = db.query(TestCase).filter(TestCase.id == id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Test case not found")
+    
+    # Safeguard against deleting scenarios with active defect capsules
+    active_capsules = [cap.id for cap in c.capsules if cap.state in ("OPEN", "REOPENED")]
+    if active_capsules and not force:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete scenario '{id}' because it has {len(active_capsules)} active Voice Defect Capsule(s) ({', '.join(active_capsules)}). Resolve or archive capsules first, or pass ?force=true."
+        )
+
     # Delete associated audio files
     for r in c.runs:
         if r.audio_path and Path(r.audio_path).exists():
@@ -178,16 +387,31 @@ async def import_cases_csv(
 ):
     """
     Import CSV columns: scenario,language,reference_text,critical_phrases,severity
-    (phrases separated by |)
+    Returns a comprehensive summary: total_rows, imported, skipped, failed, failure_reasons.
     """
     content = await file.read()
-    text = content.decode("utf-8")
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        text = content.decode("latin-1")
+    
     reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames or "scenario" not in reader.fieldnames or "reference_text" not in reader.fieldnames:
+        return {
+            "total_rows": 0,
+            "imported": 0,
+            "skipped": 0,
+            "failed": 1,
+            "failure_reasons": ["CSV missing required header columns: 'scenario' and 'reference_text'"]
+        }
 
+    total_rows = 0
     created = 0
+    skipped = 0
     errors = []
 
     for idx, row in enumerate(reader, start=1):
+        total_rows += 1
         try:
             scenario = row.get("scenario", "").strip()
             lang = row.get("language", "hi-IN").strip()
@@ -196,8 +420,15 @@ async def import_cases_csv(
             severity = row.get("severity", "HIGH").strip().upper()
 
             if not scenario or not ref:
-                errors.append(f"Row {idx}: missing scenario or reference_text")
+                errors.append(f"Row {idx}: missing required scenario title or reference_text")
+                skipped += 1
                 continue
+
+            if lang not in ("hi-IN", "hinglish"):
+                lang = "hi-IN"  # fallback with warning
+            
+            if severity not in ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL'):
+                severity = "HIGH"
 
             crit_phrases = []
             if phrases_raw:
@@ -211,14 +442,17 @@ async def import_cases_csv(
                 id=case_id,
                 suite_id=suite_id,
                 scenario=scenario,
+                title=scenario,
                 language=lang,
+                dialect="standard",
                 reference_text=ref,
                 critical_phrases_json=json.dumps(crit_phrases, ensure_ascii=False),
                 voice="Shivani",
                 tts_model="timbre-v3.0",
                 speed=1.0,
                 channel="standard",
-                severity=severity if severity in ('LOW','MEDIUM','HIGH','CRITICAL') else "HIGH",
+                sample_rate=16000,
+                severity=severity,
                 is_synthetic=1
             )
             db.add(db_case)
@@ -228,7 +462,13 @@ async def import_cases_csv(
             db.rollback()
             errors.append(f"Row {idx}: {str(e)}")
 
-    return {"imported": created, "errors": errors}
+    return {
+        "total_rows": total_rows,
+        "imported": created,
+        "skipped": skipped,
+        "failed": len(errors),
+        "failure_reasons": errors
+    }
 
 @router.post("/{id}/runs/generate")
 async def generate_and_analyze(
@@ -287,7 +527,8 @@ async def generate_and_analyze(
     try:
         dual_asr = await gnani_client.transcribe_dual_asr(
             audio_path=str(norm_wav),
-            language=c.language
+            language=c.language,
+            reference_text=c.reference_text
         )
         stt_res = dual_asr["primary_result"]
     except Exception as e:
@@ -378,7 +619,11 @@ async def upload_and_analyze(
 
     gnani_client = get_gnani_client()
     try:
-        dual_asr = await gnani_client.transcribe_dual_asr(audio_path=str(norm_wav), language=c.language)
+        dual_asr = await gnani_client.transcribe_dual_asr(
+            audio_path=str(norm_wav),
+            language=c.language,
+            reference_text=c.reference_text
+        )
         stt_res = dual_asr["primary_result"]
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Prisma transcription failed: {str(e)}")
