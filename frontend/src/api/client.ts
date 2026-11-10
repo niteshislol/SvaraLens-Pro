@@ -219,6 +219,13 @@ export async function uploadAudioRun(caseId: string, file: File, injectedFault?:
   return res.json();
 }
 
+export async function fetchRuns(caseId?: string, limit: number = 50): Promise<Run[]> {
+  const url = caseId ? `${API_BASE}/runs?case_id=${encodeURIComponent(caseId)}&limit=${limit}` : `${API_BASE}/runs?limit=${limit}`;
+  const res = await authFetch(url);
+  if (!res.ok) throw new Error('Failed to fetch runs');
+  return res.json();
+}
+
 export async function fetchRun(id: string): Promise<Run> {
   const res = await authFetch(`${API_BASE}/runs/${id}`);
   if (!res.ok) throw new Error('Failed to fetch run detail');

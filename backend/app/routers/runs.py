@@ -1,8 +1,9 @@
 import json
 import uuid
+from typing import List, Optional
 from datetime import datetime, timezone
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from ..db import get_db
@@ -13,6 +14,21 @@ from ..auth.dependencies import get_current_user, require_not_auditor
 from ..audit import record_audit_event
 
 router = APIRouter(prefix="/runs", tags=["runs"])
+
+
+@router.get("", response_model=List[RunRead])
+def list_runs(
+    case_id: Optional[str] = Query(None, description="Optional case_id filter"),
+    limit: int = Query(50, description="Max runs to return"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Lists runs for the caller's organisation, optionally filtered by case_id."""
+    query = db.query(Run).filter(Run.org_id == current_user.org_id)
+    if case_id:
+        query = query.filter(Run.case_id == case_id)
+    runs = query.order_by(Run.created_at.desc()).limit(limit).all()
+    return [get_run_detail(r.id, current_user, db) for r in runs]
 
 
 @router.get("/{id}", response_model=RunRead)

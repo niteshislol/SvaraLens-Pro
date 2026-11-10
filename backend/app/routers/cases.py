@@ -643,10 +643,10 @@ async def generate_and_analyze(
                     injected_fault=fault_val,
                     model=model_name
                 )
-                source = "MOCK_FIXTURE"
             except Exception as inner_e:
                 logger.error(f"Fallback synthesis error: {inner_e}")
-                raise HTTPException(status_code=502, detail=f"Timbre ({model_name}) synthesis failed: {str(e)}")
+                audio_bytes = mock_c._generate_synthetic_tone(duration_s=5.0)
+            source = "MOCK_FIXTURE"
 
         temp_wav = settings.AUDIO_STORE_PATH / f"{run_id}_raw.wav"
         norm_wav = settings.AUDIO_STORE_PATH / f"{run_id}.wav"
@@ -661,17 +661,7 @@ async def generate_and_analyze(
         audio_sha256 = compute_sha256(str(norm_wav))
         acoustic_data = analyze_audio_file(str(norm_wav))
 
-        try:
-            dual_asr = await gnani_client.transcribe_dual_asr(
-                audio_path=str(norm_wav),
-                language=c.language,
-                reference_text=c.reference_text
-            )
-            stt_res = dual_asr.get("primary_result")
-            if not hasattr(stt_res, "text") or not isinstance(stt_res, TranscriptResult):
-                raise RuntimeError("Dual ASR primary result not a TranscriptResult")
-        except Exception as e:
-            logger.warning(f"Live Prisma transcription error: {e}. Falling back to deterministic jury...")
+        if source == "MOCK_FIXTURE":
             from ..gnani.mock import MockGnaniClient
             mock_c = MockGnaniClient()
             dual_asr = await mock_c.transcribe_dual_asr(
@@ -680,6 +670,26 @@ async def generate_and_analyze(
                 reference_text=c.reference_text
             )
             stt_res = dual_asr.get("primary_result")
+        else:
+            try:
+                dual_asr = await gnani_client.transcribe_dual_asr(
+                    audio_path=str(norm_wav),
+                    language=c.language,
+                    reference_text=c.reference_text
+                )
+                stt_res = dual_asr.get("primary_result")
+                if not hasattr(stt_res, "text") or not isinstance(stt_res, TranscriptResult):
+                    raise RuntimeError("Dual ASR primary result not a TranscriptResult")
+            except Exception as e:
+                logger.warning(f"Live Prisma transcription error: {e}. Falling back to deterministic jury...")
+                from ..gnani.mock import MockGnaniClient
+                mock_c = MockGnaniClient()
+                dual_asr = await mock_c.transcribe_dual_asr(
+                    audio_path=str(norm_wav),
+                    language=c.language,
+                    reference_text=c.reference_text
+                )
+                stt_res = dual_asr.get("primary_result")
 
         transcript_text = getattr(stt_res, "text", "") or ""
         words_list = getattr(stt_res, "words", []) or []
