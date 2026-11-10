@@ -121,14 +121,28 @@ def remove_defect_pin(id: str, pin_id: str, db: Session = Depends(get_db)):
     db.commit()
     return get_run_detail(id, db)
 
-@router.get("/{id}/audio")
+@router.api_route("/{id:path}/audio", methods=["GET", "HEAD"])
 def get_run_audio(id: str, db: Session = Depends(get_db)):
-    run = db.query(Run).filter(Run.id == id).first()
+    import re
+    clean_id = id.strip("/")
+    
+    # If a full path or file was passed, extract the RUN-XXXX ID
+    match = re.search(r"(RUN-[A-Za-z0-9_-]+)", clean_id, re.IGNORECASE)
+    if match:
+        clean_id = match.group(1).upper()
+    elif clean_id.endswith(".wav"):
+        clean_id = clean_id[:-4].split("/")[-1]
+
+    run = db.query(Run).filter(Run.id == clean_id).first()
     if not run or not run.audio_path:
+        # Check if the id passed was actually an existing file path directly
+        p = Path(id)
+        if p.exists() and p.is_file():
+            return FileResponse(path=str(p), media_type="audio/wav", filename=p.name)
         raise HTTPException(status_code=404, detail="Audio not found")
 
     p = Path(run.audio_path)
     if not p.exists():
         raise HTTPException(status_code=404, detail="Audio file missing on disk")
 
-    return FileResponse(path=str(p), media_type="audio/wav", filename=f"{id}.wav")
+    return FileResponse(path=str(p), media_type="audio/wav", filename=f"{clean_id}.wav")

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { TestCase, Run, Capsule, RegressionRun } from '../types';
 import {
-  fetchTestCases, fetchRun, triggerGenerateRun,
+  fetchTestCases, fetchRun, triggerGenerateRun, fetchLatestRunForCase,
   createTestCase, importCasesCsv, addDefectPin, removeDefectPin,
   updateFinding, compileCapsule, rerunRegression, approveRegression,
   getAudioUrl, duplicateTestCase, validateCapsuleIntegrity
@@ -95,7 +95,7 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
 
   const activeCase = cases.find(c => c.id === selectedCaseId) || cases[0];
 
-  // Auto-set voice when changing scenario
+  // Auto-set voice & load latest run when changing scenario
   useEffect(() => {
     if (!activeCase) return;
     if (activeCase.tts_model === 'timbre-v2.5') {
@@ -105,6 +105,24 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
       setSelectedModel('timbre-v3.0');
       setSelectedVoice('Shivani - Warm & Conversational');
     }
+
+    // Automatically load the latest run for this scenario if already synthesized
+    fetchLatestRunForCase(activeCase.id)
+      .then(run => {
+        setActiveRun(run);
+        if (run?.findings && run.findings.length > 0) {
+          const f = run.findings[0];
+          if (f.region_start_s != null && f.region_end_s != null) {
+            setHighlightRegion([f.region_start_s, f.region_end_s]);
+          }
+        } else {
+          setHighlightRegion(undefined);
+        }
+      })
+      .catch(() => {
+        setActiveRun(null);
+        setHighlightRegion(undefined);
+      });
   }, [selectedCaseId]);
 
   // Handle Speech Generation
@@ -638,8 +656,8 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
           {/* Pro Waveform Player */}
           {activeRun?.audio_path ? (
             <ProWaveformPlayer
-              primaryAudioUrl={getAudioUrl(activeRun.audio_path)}
-              comparisonAudioUrl={fixedRun?.audio_path ? getAudioUrl(fixedRun.audio_path) : undefined}
+              primaryAudioUrl={getAudioUrl(activeRun.id)}
+              comparisonAudioUrl={fixedRun ? getAudioUrl(fixedRun.id) : undefined}
               defectPins={activeRun.defect_pins || []}
               highlightRegion={highlightRegion}
               onRegionSelected={(s, e) => {

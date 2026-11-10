@@ -470,6 +470,14 @@ async def import_cases_csv(
         "failure_reasons": errors
     }
 
+@router.get("/{id}/runs/latest", response_model=RunRead)
+def get_latest_run_for_case(id: str, db: Session = Depends(get_db)):
+    run = db.query(Run).filter(Run.case_id == id).order_by(Run.created_at.desc()).first()
+    if not run:
+        raise HTTPException(status_code=404, detail=f"No runs found for case {id}")
+    from .runs import get_run_detail
+    return get_run_detail(run.id, db)
+
 @router.post("/{id}/runs/generate")
 async def generate_and_analyze(
     id: str,

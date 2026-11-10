@@ -114,8 +114,28 @@ export async function fetchRun(id: string): Promise<Run> {
   return res.json();
 }
 
-export function getAudioUrl(runId: string): string {
-  return `${API_BASE}/runs/${runId}/audio`;
+export async function fetchLatestRunForCase(caseId: string): Promise<Run | null> {
+  const res = await fetch(`${API_BASE}/cases/${caseId}/runs/latest`);
+  if (!res.ok) {
+    if (res.status === 404) return null;
+    throw new Error('Failed to fetch latest run for case');
+  }
+  return res.json();
+}
+
+export function getAudioUrl(runOrPath: string): string {
+  if (!runOrPath) return '';
+  if (runOrPath.startsWith('http')) return runOrPath;
+
+  // Extract RUN-XXXX identifier from string or path if present
+  const match = runOrPath.match(/(RUN-[A-Za-z0-9_-]+)/i);
+  if (match) {
+    return `${API_BASE}/runs/${match[1]}/audio`;
+  }
+
+  // Strip any leading directories or .wav extensions
+  const cleanId = runOrPath.replace(/^.*[\\\/]/, '').replace(/\.wav$/i, '');
+  return `${API_BASE}/runs/${cleanId}/audio`;
 }
 
 export async function updateFinding(
