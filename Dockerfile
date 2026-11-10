@@ -28,7 +28,11 @@ COPY fixtures/ ./fixtures/
 COPY --from=frontend-builder /build/dist ./frontend/dist
 COPY --from=landing-builder /build-landing/dist ./landing/dist
 
+# Create storage directories
+RUN mkdir -p /app/data /app/storage/audio
+
 ENV PYTHONPATH=/app/backend
+ENV PORT=8000
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

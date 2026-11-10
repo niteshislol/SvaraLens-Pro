@@ -194,6 +194,7 @@ Detailed engineering documentation is located in the `docs/` directory:
 - [AUDIO_ANALYSIS.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/AUDIO_ANALYSIS.md): DSP framing algorithms, tail energy calculations, and corroboration matrices.
 - [CAPSULE_WORKFLOW.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/CAPSULE_WORKFLOW.md): Defect-to-regression lifecycle, SHA-256 byte digests, and 10 assertion templates.
 - [TESTING.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/TESTING.md): Testing strategy, coverage details, and CI/CD commands.
+- [RENDER_DEPLOYMENT_GUIDE.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/RENDER_DEPLOYMENT_GUIDE.md): 3-minute step-by-step guide to deploying SvaraLens live on Render with Docker or Blueprints.
 - [DEPLOYMENT.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/DEPLOYMENT.md): Local, Docker, and production single-server deployment procedures.
 - [KNOWN_LIMITATIONS.md](file:///Users/niteshislol/ANTIGRAVITYCODE/SvaraLens/docs/KNOWN_LIMITATIONS.md): Operational boundaries, rate limits, and subjective prosody handling.
 

@@ -176,6 +176,50 @@ def ensure_schema(bind_engine):
                     "auditor_hash": auditor_hash
                 })
 
+            # 6. Seed default test suite if missing
+            conn.execute(text("""
+                INSERT OR IGNORE INTO suites (id, org_id, name, description, language, domain, created_at)
+                VALUES ('suite-insurance-hi', 'org-default', 'General Insurance Hindi Suite', 'Core conversational IVR and claims validation suite', 'hi-IN', 'insurance', '2026-11-10T00:00:00Z')
+            """))
+
+            # 7. Seed initial test cases if no test cases exist
+            res_cases = conn.execute(text("SELECT COUNT(*) FROM test_cases"))
+            case_count = res_cases.scalar() or 0
+            if case_count == 0:
+                try:
+                    import json
+                    from scripts.demo_data import DEMO_CASES
+                    for c in DEMO_CASES:
+                        conn.execute(text("""
+                            INSERT OR IGNORE INTO test_cases (
+                                id, org_id, suite_id, scenario, title, dialect, language,
+                                reference_text, critical_phrases_json, voice, tts_model, speed,
+                                channel, sample_rate, severity, is_synthetic, created_at
+                            ) VALUES (
+                                :id, 'org-default', :suite_id, :scenario, :title, :dialect, :language,
+                                :reference_text, :critical_phrases_json, :voice, :tts_model, :speed,
+                                :channel, :sample_rate, :severity, :is_synthetic, '2026-11-10T00:00:00Z'
+                            )
+                        """), {
+                            "id": c["id"],
+                            "suite_id": c.get("suite_id", "suite-insurance-hi"),
+                            "scenario": c["scenario"],
+                            "title": c.get("title", c["scenario"]),
+                            "dialect": c.get("dialect", "standard"),
+                            "language": c.get("language", "hi-IN"),
+                            "reference_text": c["reference_text"],
+                            "critical_phrases_json": json.dumps(c.get("critical_phrases", []), ensure_ascii=False),
+                            "voice": c.get("voice", "Shivani"),
+                            "tts_model": c.get("tts_model", "timbre-v3.0"),
+                            "speed": c.get("speed", 1.0),
+                            "channel": c.get("channel", "standard"),
+                            "sample_rate": c.get("sample_rate", 16000),
+                            "severity": c.get("severity", "MEDIUM"),
+                            "is_synthetic": c.get("is_synthetic", 1)
+                        })
+                except Exception as seed_err:
+                    print(f"Initial test cases auto-seed note: {seed_err}")
+
             conn.commit()
     except Exception as e:
         print(f"Schema check error: {e}")

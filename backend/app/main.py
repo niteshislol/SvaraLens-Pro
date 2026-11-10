@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,9 +31,12 @@ if "*" in settings.CORS_ORIGINS and settings.ALLOW_CREDENTIALS:
     raise ValueError("CORS configuration invalid: wildcard origin '*' is prohibited when allow_credentials=True.")
 
 # Default safe explicit localhost origins if unset in development
-resolved_origins = settings.CORS_ORIGINS if settings.CORS_ORIGINS else [
+resolved_origins = list(settings.CORS_ORIGINS) if settings.CORS_ORIGINS else [
     "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000", "http://127.0.0.1:3000"
 ]
+render_url = os.getenv("RENDER_EXTERNAL_URL")
+if render_url and render_url not in resolved_origins:
+    resolved_origins.append(render_url)
 
 app.add_middleware(
     CORSMiddleware,

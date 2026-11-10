@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: svaralens-pro
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: GNANI_API_KEY
+        sync: false
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: MOCK_MODE
+        value: "false"
+      - key: ALLOW_CREDENTIALS
+        value: "true"
+      - key: CORS_ORIGINS
+        value: "http://localhost:5173,http://localhost:3000"
