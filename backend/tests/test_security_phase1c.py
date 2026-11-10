@@ -275,18 +275,21 @@ def test_cross_organisation_record_access_returns_404(admin_client, beta_org_cli
 def test_forged_reviewer_identity_ignored(admin_client, reviewer_client):
     """Finding review must record authenticated user identity and ignore client spoofing."""
     case_id = f"TC-SEC-FORGE-{uuid.uuid4().hex[:6]}"
+    ref_text = "आपका अगला प्रीमियम भुगतान ₹4,250 12 नवंबर को देय है। 150 रुपये का विलंब शुल्क लग सकता है।"
     admin_client.post("/api/cases", json={
         "id": case_id,
         "suite_id": "suite-insurance-hi",
         "scenario": "Forge Reviewer Identity Test",
         "language": "hi-IN",
-        "reference_text": "आपका दावा स्वीकृत हो गया है।",
-        "critical_phrases": [{"text": "दावा स्वीकृत", "severity": "CRITICAL"}]
+        "reference_text": ref_text,
+        "critical_phrases": [{"text": "₹4,250", "severity": "HIGH"}, {"text": "विलंब शुल्क", "severity": "CRITICAL"}]
     })
     gen_res = admin_client.post(f"/api/cases/{case_id}/runs/generate?injected_fault=END_TRUNCATION")
     run_id = gen_res.json()["run_id"]
     run_data = admin_client.get(f"/api/runs/{run_id}").json()
-    finding_id = run_data["findings"][0]["id"]
+    failing = next((f for f in run_data["findings"] if f["status"] in ("FAIL", "SUSPECTED")), run_data["findings"][0] if run_data["findings"] else None)
+    assert failing is not None
+    finding_id = failing["id"]
 
     # Reviewer submits patch attempting to forge reviewed_by as "ChiefExecutiveOfficer"
     patch_res = reviewer_client.patch(f"/api/findings/{finding_id}", json={
@@ -347,16 +350,20 @@ def test_forged_approver_identity_ignored(admin_client, lead_client):
 def test_audit_event_created_on_finding_confirmation(admin_client, reviewer_client):
     """Confirming a finding must append an immutable AuditEvent in the database."""
     case_id = f"TC-SEC-AUD-FND-{uuid.uuid4().hex[:6]}"
+    ref_text = "आपका अगला प्रीमियम भुगतान ₹4,250 12 नवंबर को देय है। 150 रुपये का विलंब शुल्क लग सकता है।"
     admin_client.post("/api/cases", json={
         "id": case_id,
         "suite_id": "suite-insurance-hi",
         "scenario": "Audit Event Confirmation Test",
         "language": "hi-IN",
-        "reference_text": "आपका बैलेंस कम है।",
-        "critical_phrases": [{"text": "बैलेंस कम", "severity": "HIGH"}]
+        "reference_text": ref_text,
+        "critical_phrases": [{"text": "₹4,250", "severity": "HIGH"}, {"text": "विलंब शुल्क", "severity": "CRITICAL"}]
     })
     gen_res = admin_client.post(f"/api/cases/{case_id}/runs/generate?injected_fault=END_TRUNCATION")
-    finding_id = admin_client.get(f"/api/runs/{gen_res.json()['run_id']}").json()["findings"][0]["id"]
+    run_data = admin_client.get(f"/api/runs/{gen_res.json()['run_id']}").json()
+    failing = next((f for f in run_data["findings"] if f["status"] in ("FAIL", "SUSPECTED")), run_data["findings"][0] if run_data["findings"] else None)
+    assert failing is not None
+    finding_id = failing["id"]
 
     # Reviewer confirms finding
     reviewer_client.patch(f"/api/findings/{finding_id}", json={

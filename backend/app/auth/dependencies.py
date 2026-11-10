@@ -17,10 +17,12 @@ def get_current_user(
     """Authenticates the incoming request using a Bearer JWT token.
     Enforces token validity, expiry, and active user status."""
     if not token:
-        # Check direct Authorization header fallback
+        # Check direct Authorization header fallback or query param token (for media streaming)
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header[7:].strip()
+        elif request.query_params.get("token"):
+            token = request.query_params.get("token").strip()
         else:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

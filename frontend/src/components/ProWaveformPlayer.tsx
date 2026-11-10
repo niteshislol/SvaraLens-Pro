@@ -4,6 +4,7 @@ import {
   Pin, ChevronDown
 } from 'lucide-react';
 import { DefectPin } from '../types';
+import { authFetch } from '../api/client';
 
 interface ProWaveformPlayerProps {
   primaryAudioUrl: string;
@@ -53,7 +54,7 @@ export const ProWaveformPlayer: React.FC<ProWaveformPlayerProps> = ({
   useEffect(() => {
     if (!primaryAudioUrl) return;
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-    fetch(primaryAudioUrl)
+    authFetch(primaryAudioUrl)
       .then(res => res.arrayBuffer())
       .then(ab => ctx.decodeAudioData(ab))
       .then(buf => {
@@ -74,7 +75,7 @@ export const ProWaveformPlayer: React.FC<ProWaveformPlayerProps> = ({
       return;
     }
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-    fetch(comparisonAudioUrl)
+    authFetch(comparisonAudioUrl)
       .then(res => res.arrayBuffer())
       .then(ab => ctx.decodeAudioData(ab))
       .then(buf => setCompAudioBuffer(buf))
