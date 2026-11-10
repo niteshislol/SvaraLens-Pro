@@ -51,7 +51,7 @@ def list_test_cases(
             (TestCase.scenario.ilike(search_filter)) |
             (TestCase.reference_text.ilike(search_filter))
         )
-    cases = query.order_by(TestCase.id).all()
+    cases = query.order_by(TestCase.created_at.desc(), TestCase.id.desc()).all()
     
     results = []
     for c in cases:
@@ -94,7 +94,7 @@ def export_test_cases(
     query = db.query(TestCase)
     if suite_id:
         query = query.filter(TestCase.suite_id == suite_id)
-    cases = query.order_by(TestCase.id).all()
+    cases = query.order_by(TestCase.created_at.desc(), TestCase.id.desc()).all()
 
     if format == "json":
         data = []

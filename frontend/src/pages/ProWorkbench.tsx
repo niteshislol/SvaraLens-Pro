@@ -73,14 +73,23 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
   const [pinSeverity, setPinSeverity] = useState<string>('CRITICAL');
   const [pinNote, setPinNote] = useState<string>('Audible syllable drop on closing disclosure');
 
-  // Load Test Cases
+  // Load Test Cases (Latest Scenarios on upper side)
   const loadCases = async () => {
     try {
       setLoadingCases(true);
       const data = await fetchTestCases('suite-insurance-hi');
-      setCases(data);
-      if (data.length > 0 && !selectedCaseId) {
-        setSelectedCaseId(data[0].id);
+      const sorted = [...data].sort((a, b) => {
+        if (a.created_at && b.created_at) {
+          const diff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+          if (diff !== 0) return diff;
+        }
+        const numA = parseInt(a.id.replace(/\D/g, '') || '0', 10);
+        const numB = parseInt(b.id.replace(/\D/g, '') || '0', 10);
+        return numB - numA;
+      });
+      setCases(sorted);
+      if (sorted.length > 0 && !selectedCaseId) {
+        setSelectedCaseId(sorted[0].id);
       }
     } catch (err) {
       console.error('Failed to load test cases', err);
@@ -256,13 +265,23 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
     }
   };
 
-  // Filtered Scenario list
-  const filteredCases = cases.filter(c => {
-    const matchesSearch = c.scenario.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          c.id.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesLang = languageFilter === 'ALL' || c.language === languageFilter;
-    return matchesSearch && matchesLang;
-  });
+  // Filtered Scenario list: sorted so LATEST scenarios show on upper side
+  const filteredCases = cases
+    .filter(c => {
+      const matchesSearch = c.scenario.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                            c.id.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesLang = languageFilter === 'ALL' || c.language === languageFilter;
+      return matchesSearch && matchesLang;
+    })
+    .sort((a, b) => {
+      if (a.created_at && b.created_at) {
+        const diff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        if (diff !== 0) return diff;
+      }
+      const numA = parseInt(a.id.replace(/\D/g, '') || '0', 10);
+      const numB = parseInt(b.id.replace(/\D/g, '') || '0', 10);
+      return numB - numA;
+    });
 
   // Calculate current workflow step (1 to 6)
   const getWorkflowStep = () => {
@@ -278,13 +297,13 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
   const workflowStep = getWorkflowStep();
 
   return (
-    <div className="flex-1 flex overflow-hidden h-[calc(100vh-64px)] bg-[#F8FAFC]">
+    <div className="flex-1 flex min-h-0 h-full overflow-hidden bg-[#F8FAFC]">
       {/* ============================================================== */}
       {/* 1. LEFT SIDEBAR: SCENARIO EXPLORER (Reference Image B)         */}
       {/* ============================================================== */}
-      <aside className="w-[280px] lg:w-[300px] shrink-0 bg-white border-r border-[#E7ECF3] flex flex-col h-full shadow-[1px_0_2px_rgba(0,0,0,0.02)]">
+      <aside className="w-[280px] lg:w-[300px] shrink-0 bg-white border-r border-[#E7ECF3] flex flex-col h-full min-h-0 overflow-hidden shadow-[1px_0_2px_rgba(0,0,0,0.02)]">
         {/* Header with Title, Suite Subtitle, and Plus Button */}
-        <div className="p-4 border-b border-[#E7ECF3]">
+        <div className="p-4 border-b border-[#E7ECF3] shrink-0">
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-bold text-[#172033]">Scenarios</h2>
@@ -358,8 +377,8 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
           </div>
         </div>
 
-        {/* Scenario List */}
-        <div className="flex-1 overflow-y-auto divide-y divide-[#F1F5F9]">
+        {/* Scenario List (Independent Scrolling) */}
+        <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-[#F1F5F9] overscroll-y-contain">
           {loadingCases ? (
             <div className="p-4 text-center text-xs text-[#94A3B8] flex items-center justify-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin text-[#3867E8]" />
@@ -408,7 +427,7 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
         </div>
 
         {/* Bottom Create Scenario Button */}
-        <div className="p-3 border-t border-[#E7ECF3] bg-white">
+        <div className="p-3 border-t border-[#E7ECF3] bg-white shrink-0">
           <button
             onClick={() => setShowNewCaseModal(true)}
             className="w-full py-2 px-3 border border-[#E7ECF3] bg-white hover:bg-[#F8FAFC] text-[#3867E8] font-medium text-xs rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-colors"
@@ -422,7 +441,7 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
       {/* ============================================================== */}
       {/* 2. CENTRE WORKSPACE: MAIN CONTENT (Reference Image B)          */}
       {/* ============================================================== */}
-      <main className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+      <main className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4 overscroll-y-contain">
         {/* A. Workflow Progress Indicator (Reference Image B) */}
         <div className="bg-white border border-[#E7ECF3] rounded-xl px-5 py-3 shadow-sm">
           <div className="flex items-center justify-between max-w-2xl mx-auto">
@@ -693,9 +712,9 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
       {/* ============================================================== */}
       {/* 3. RIGHT INSPECTOR: COMPACT AUDIO HEALTH (Reference Images A & B) */}
       {/* ============================================================== */}
-      <aside className="w-[320px] lg:w-[340px] shrink-0 bg-white border-l border-[#E7ECF3] flex flex-col h-full shadow-[-1px_0_2px_rgba(0,0,0,0.02)]">
+      <aside className="w-[320px] lg:w-[340px] shrink-0 bg-white border-l border-[#E7ECF3] flex flex-col h-full min-h-0 overflow-hidden shadow-[-1px_0_2px_rgba(0,0,0,0.02)]">
         {/* Tab Headers: Radar, Pins, Capsule */}
-        <div className="flex border-b border-[#E7ECF3] px-3 pt-2">
+        <div className="flex border-b border-[#E7ECF3] px-3 pt-2 shrink-0">
           <button
             onClick={() => setRightTab('radar')}
             className={`flex-1 pb-2.5 text-xs font-semibold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
@@ -734,7 +753,7 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
 
         {/* Tab 1: Radar Content (Reference Image A) */}
         {rightTab === 'radar' && (
-          <div className="flex-1 overflow-y-auto p-4 space-y-5">
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-5 overscroll-y-contain">
             <div>
               <h3 className="text-xs font-bold text-[#172033] uppercase tracking-wider mb-2">
                 Audio Health & Quality
@@ -783,7 +802,7 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
 
         {/* Tab 2: Defect Pins List */}
         {rightTab === 'pins' && (
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3 overscroll-y-contain">
             <div className="flex items-center justify-between pb-2 border-b border-[#E7ECF3]">
               <h4 className="text-xs font-bold text-[#172033]">Pinned Defects</h4>
               <button
@@ -826,7 +845,7 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
 
         {/* Tab 3: Capsule Summary & Regression Runner */}
         {rightTab === 'capsule' && (
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 overscroll-y-contain">
             {activeCapsule ? (
               <div className="space-y-4">
                 {/* Capsule Header Card */}

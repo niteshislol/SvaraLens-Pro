@@ -43,10 +43,10 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-[#172033] flex flex-col font-sans selection:bg-[#EEF4FF] selection:text-[#3867E8]">
+    <div className="h-screen w-screen overflow-hidden bg-[#F8FAFC] text-[#172033] flex flex-col font-sans selection:bg-[#EEF4FF] selection:text-[#3867E8]">
       {/* Persistent Mock Mode Warning Banner (if mock mode) */}
       {health?.mock_mode && (
-        <div className="bg-[#FFF7E8] border-b border-[#FDE3B7] px-4 py-1.5 text-xs text-[#D99520] flex items-center justify-between">
+        <div className="bg-[#FFF7E8] border-b border-[#FDE3B7] px-4 py-1.5 text-xs text-[#D99520] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 shrink-0" />
             <span>
@@ -58,7 +58,7 @@ export function App() {
       )}
 
       {/* Global Top Navigation Bar (64px) — Exact Match to Reference Images A & B */}
-      <header className="bg-white border-b border-[#E7ECF3] h-16 sticky top-0 z-40 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+      <header className="bg-white border-b border-[#E7ECF3] h-16 shrink-0 z-40 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
         <div className="w-full px-5 h-full flex items-center justify-between gap-4">
           {/* Left: SvaraLens Logo, Name, PRO Badge, Subtitle */}
           <div className="flex items-center gap-3 shrink-0">
@@ -175,7 +175,7 @@ export function App() {
       </header>
 
       {/* Main Full-Width Application Area */}
-      <main className="flex-1 flex flex-col min-h-0">
+      <main className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {currentView === 'workbench' && (
           <ProWorkbench
             initialCaseId={activeCaseId}
@@ -184,23 +184,27 @@ export function App() {
         )}
 
         {currentView === 'analytics' && (
-          <div className="max-w-7xl w-full mx-auto p-6">
-            <SuiteDashboard
-              onNavigate={(view, id) => {
-                if (id) setActiveCaseId(id);
-                if (view === 'cases') setCurrentView('workbench');
-                else if (view === 'capsules') setCurrentView('capsules');
-              }}
-            />
+          <div className="flex-1 overflow-y-auto overscroll-y-contain p-6">
+            <div className="max-w-7xl w-full mx-auto">
+              <SuiteDashboard
+                onNavigate={(view, id) => {
+                  if (id) setActiveCaseId(id);
+                  if (view === 'cases') setCurrentView('workbench');
+                  else if (view === 'capsules') setCurrentView('capsules');
+                }}
+              />
+            </div>
           </div>
         )}
 
         {currentView === 'capsules' && (
-          <div className="max-w-7xl w-full mx-auto p-6">
-            <CapsuleView
-              initialCapsuleId={activeCapsuleId}
-              onBack={() => setCurrentView('workbench')}
-            />
+          <div className="flex-1 overflow-y-auto overscroll-y-contain p-6">
+            <div className="max-w-7xl w-full mx-auto">
+              <CapsuleView
+                initialCapsuleId={activeCapsuleId}
+                onBack={() => setCurrentView('workbench')}
+              />
+            </div>
           </div>
         )}
       </main>
