@@ -21,24 +21,58 @@ export function getAuthToken(): string | null {
   return authToken;
 }
 
+export function getStoredUser(): { username: string; role: string; full_name?: string } | null {
+  if (typeof window !== 'undefined') {
+    const raw = localStorage.getItem('svaralens_user');
+    if (raw) {
+      try { return JSON.parse(raw); } catch { return null; }
+    }
+  }
+  return null;
+}
+
+export function setStoredUser(user: { username: string; role: string; full_name?: string } | null) {
+  if (typeof window !== 'undefined') {
+    if (user) localStorage.setItem('svaralens_user', JSON.stringify(user));
+    else localStorage.removeItem('svaralens_user');
+  }
+}
+
+export async function loginUser(username: string, password: string): Promise<{ access_token: string; user?: any }> {
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Authentication failed' }));
+    throw new Error(err.detail || 'Login failed');
+  }
+  const data = await res.json();
+  setAuthToken(data.access_token);
+  if (data.user) {
+    setStoredUser(data.user);
+  } else {
+    setStoredUser({ username, role: username === 'admin' ? 'ADMIN' : username.toUpperCase() });
+  }
+  return data;
+}
+
+export function logoutUser() {
+  setAuthToken(null);
+  setStoredUser(null);
+}
+
 export async function ensureAuthToken(): Promise<string> {
   let token = getAuthToken();
   if (token) return token;
 
+  // Local demo session initialisation (offline demo convenience)
   try {
-    const res = await fetch(`${API_BASE}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'admin', password: 'AdminPassword@123!' })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      token = data.access_token;
-      setAuthToken(token);
-      return token || '';
-    }
+    const data = await loginUser('admin', 'AdminPassword@123!');
+    return data.access_token || '';
   } catch (err) {
-    console.warn('Auto-authentication attempt failed', err);
+    console.warn('Session initialisation notice: please sign in', err);
   }
   return '';
 }

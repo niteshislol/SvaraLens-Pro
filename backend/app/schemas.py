@@ -283,6 +283,9 @@ class HealthResponse(BaseModel):
     prisma_model: str
     database_connected: bool
     gnani_connected: bool = False
+    provider_verified: bool = False
+    provider_detail: Optional[str] = None
+    last_verified_at: Optional[str] = None
     execution_mode: str = "MOCK"
     scenarios_count: int = 0
     capsules_count: int = 0

@@ -218,6 +218,9 @@ export interface Health {
   prisma_model: string;
   database_connected: boolean;
   gnani_connected?: boolean;
+  provider_verified?: boolean;
+  provider_detail?: string;
+  last_verified_at?: string;
   execution_mode?: string;
   scenarios_count?: number;
   capsules_count?: number;

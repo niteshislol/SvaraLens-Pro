@@ -54,10 +54,15 @@ export const RunAnalysis: React.FC<RunAnalysisProps> = ({
   }, [runId]);
 
   const handleConfirmFinding = async (findingId: string) => {
+    const note = window.prompt(
+      'Enter human reviewer confirmation note (e.g. Verified speech defect on audio playback):',
+      'Audited audio playback; confirmed speech defect matches automated finding.'
+    );
+    if (note === null) return;
     try {
       await updateFinding(findingId, {
         review_state: 'HUMAN_CONFIRMED',
-        reviewed_by: 'QA Consultant'
+        reviewer_note: note
       });
       await loadRun();
     } catch (e) {
@@ -66,10 +71,15 @@ export const RunAnalysis: React.FC<RunAnalysisProps> = ({
   };
 
   const handleRejectFinding = async (findingId: string) => {
+    const note = window.prompt(
+      'Enter reviewer note for marking finding as false alarm:',
+      'Marked as false alarm upon listener audio review.'
+    );
+    if (note === null) return;
     try {
       await updateFinding(findingId, {
         review_state: 'FALSE_POSITIVE',
-        reviewer_note: 'Marked as false alarm upon audio review.'
+        reviewer_note: note
       });
       await loadRun();
     } catch (e) {

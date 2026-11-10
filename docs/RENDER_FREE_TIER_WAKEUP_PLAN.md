@@ -70,19 +70,30 @@ SvaraLens includes a dedicated zero-overhead ping route:
 
 ---
 
-### Step 3: Daytime Keep-Alive with cron-job.org (Every 14 Minutes)
+### Step 3: Daytime Keep-Alive with cron-job.org or GitHub Actions (Every 14 Minutes)
 
-1. Sign up for a free account at [cron-job.org](https://cron-job.org/).
+1. Sign up for a free account at [cron-job.org](https://cron-job.org/) (or use GitHub Actions / any standard UTC cron engine).
 2. Click **"Create Cronjob"**:
    * **Title:** `SvaraLens Render Keep-Alive`
    * **URL:** `https://<your-service>.onrender.com/ping`
-   * **Execution Schedule:** Custom Cron Expression
+   * **Execution Schedule (UTC Expressions):**
+
+     **Option A — India Daytime Window (08:00 AM to 06:00 PM IST) expressed in UTC:**
+     *(India is UTC+5:30; 08:00 IST is 02:30 UTC and 18:00 IST is 12:30 UTC)*
+     ```cron
+     */14 2-12 * * *
      ```
+     *(Runs every 14 minutes between 02:00 and 12:59 UTC, covering 07:30 AM to 06:29 PM IST).*
+
+     **Option B — Pure UTC Daytime Window (08:00 AM to 06:00 PM UTC):**
+     ```cron
      */14 8-17 * * *
      ```
-     *(Runs every 14 minutes from 08:00 AM to 05:59 PM in your selected timezone).*
+     *(Runs every 14 minutes between 08:00 and 17:59 UTC).*
+
 3. **Advanced Settings:**
    * Request Timeout: `30 seconds`
+   * Timezone: **UTC**
    * Save responses in job history: **Enabled**
    * Failure notification: **Notify after 3 consecutive failures**
 4. Click **Create**.
@@ -97,8 +108,11 @@ If you prefer running a script locally, from a homelab, or on a VM:
 # One-time ping check
 python3 scripts/keep_alive.py --once --url https://<your-service>.onrender.com
 
-# Continuous smart daemon (IST timezone: 08:00 to 18:00, ping every 14m)
-python3 scripts/keep_alive.py --url https://<your-service>.onrender.com --start-hour 8 --end-hour 18 --interval 14 --tz-offset 5.5
+# Continuous smart daemon in UTC (08:00 to 18:00 UTC, ping every 14m)
+python3 scripts/keep_alive.py --url https://<your-service>.onrender.com --start-hour 8 --end-hour 18 --interval 14 --tz-offset 0
+
+# Continuous smart daemon for India hours in UTC (02:00 to 13:00 UTC, ping every 14m)
+python3 scripts/keep_alive.py --url https://<your-service>.onrender.com --start-hour 2 --end-hour 13 --interval 14 --tz-offset 0
 ```
 
 ---

@@ -15,17 +15,19 @@ import {
   Plus, Search, FileText, CheckCircle2, ChevronDown,
   Layers, Pin, ArrowRight, Loader2, RefreshCw, Copy,
   Check, Download, AlertTriangle, ShieldCheck, Sparkles,
-  Cpu, Filter, Activity
+  Cpu, Filter, Activity, Headphones
 } from 'lucide-react';
 
 interface ProWorkbenchProps {
   initialCaseId?: string;
   onOpenReport?: () => void;
+  onNavigateToRunAnalysis?: (runId: string) => void;
 }
 
 export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
   initialCaseId = 'TC-007',
-  onOpenReport
+  onOpenReport,
+  onNavigateToRunAnalysis
 }) => {
   // Navigation & Case State
   const [cases, setCases] = useState<TestCase[]>([]);
@@ -37,7 +39,14 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
   // Model & Synthesis Arena State
   const [selectedModel, setSelectedModel] = useState<'timbre-v3.0' | 'timbre-v2.5'>('timbre-v3.0');
   const [selectedVoice, setSelectedVoice] = useState<string>('Shivani - Warm & Conversational');
+  const [faultMode, setFaultMode] = useState<'NONE' | 'END_TRUNCATION'>('NONE');
   const [generating, setGenerating] = useState(false);
+
+  // Human Review & Confirmation State
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [selectedFindingToReview, setSelectedFindingToReview] = useState<any | null>(null);
+  const [reviewerNoteInput, setReviewerNoteInput] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
   // Active Run & Audio Telemetry State
   const [activeRun, setActiveRun] = useState<Run | null>(null);
@@ -176,7 +185,8 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
       setGenerating(true);
       // Clean voice name (strip description)
       const cleanVoice = selectedVoice.split(' - ')[0].trim();
-      const res = await triggerGenerateRun(activeCase.id, undefined, selectedModel, cleanVoice);
+      const faultParam = faultMode === 'END_TRUNCATION' ? 'END_TRUNCATION' : undefined;
+      const res = await triggerGenerateRun(activeCase.id, faultParam, selectedModel, cleanVoice);
       const runData = await fetchRun(res.run_id);
       setActiveRun(runData);
 
@@ -214,22 +224,59 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
     }
   };
 
-  // Compile Capsule
+  // Human Review & Finding Confirmation Action
+  const handleReviewFindingAction = async (confirmed: boolean) => {
+    if (!selectedFindingToReview || !activeRun) return;
+    try {
+      setReviewSubmitting(true);
+      const targetState = confirmed ? 'HUMAN_CONFIRMED' : 'FALSE_POSITIVE';
+      await updateFinding(selectedFindingToReview.id, {
+        review_state: targetState,
+        reviewer_note: reviewerNoteInput.trim() || (confirmed ? 'Confirmed upon human audio playback review.' : 'Marked as false alarm upon review.')
+      });
+      const refreshedRun = await fetchRun(activeRun.id);
+      setActiveRun(refreshedRun);
+      setShowReviewModal(false);
+
+      if (confirmed) {
+        if (window.confirm('Defect confirmed by human reviewer! Would you like to compile the Voice Defect Capsule now?')) {
+          setCompilingCapsule(true);
+          const cap = await compileCapsule(selectedFindingToReview.id);
+          setActiveCapsule(cap);
+          setRightTab('capsule');
+        }
+      }
+    } catch (err) {
+      alert(`Review action failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setReviewSubmitting(false);
+      setCompilingCapsule(false);
+    }
+  };
+
+  // Compile Capsule (Requires Human Review First)
   const handleCompileCapsule = async () => {
     if (!activeRun) return;
+    const candFinding = activeRun.findings.find(f => f.status === 'FAIL' || f.status === 'SUSPECTED') || activeRun.findings[0];
+    if (!candFinding) {
+      alert('No failure finding detected to compile capsule from.');
+      return;
+    }
+
+    // Require actual human reviewer confirmation
+    if (candFinding.review_state !== 'HUMAN_CONFIRMED') {
+      setSelectedFindingToReview(candFinding);
+      setReviewerNoteInput(
+        candFinding.check_type === 'CRITICAL_PHRASE_MISSING' || candFinding.check_type === 'END_TRUNCATION_SUSPECTED'
+          ? 'Audited Hindi audio playback; verified ₹150 penalty disclosure was cut off.'
+          : 'Reviewed speech audio waveform and confirmed defect.'
+      );
+      setShowReviewModal(true);
+      return;
+    }
+
     try {
       setCompilingCapsule(true);
-      const candFinding = activeRun.findings.find(f => f.status === 'FAIL' || f.status === 'SUSPECTED') || activeRun.findings[0];
-      if (!candFinding) {
-        alert('No failure finding detected to compile capsule from.');
-        return;
-      }
-
-      await updateFinding(candFinding.id, {
-        review_state: 'HUMAN_CONFIRMED',
-        reviewer_note: 'Verified speech defect anchored via Pro Workbench Defect Pin.'
-      });
-
       const cap = await compileCapsule(candFinding.id);
       setActiveCapsule(cap);
       setRightTab('capsule');
@@ -677,6 +724,24 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-[#64748B] absolute right-2.5 top-1/2 transform -translate-y-1/2 pointer-events-none" />
             </div>
+
+            {/* Controlled Defect Injection Selector (Issue 1) */}
+            <div className="relative flex-1 min-w-[220px]">
+              <select
+                value={faultMode}
+                onChange={(e) => setFaultMode(e.target.value as any)}
+                className={`w-full text-xs font-medium bg-[#F8FAFC] border rounded-lg px-3 py-2 pr-8 appearance-none focus:outline-none cursor-pointer ${
+                  faultMode === 'END_TRUNCATION'
+                    ? 'border-[#D94848] text-[#D94848] bg-[#FFF5F5] font-semibold'
+                    : 'border-[#E7ECF3] text-[#172033] focus:border-[#3867E8]'
+                }`}
+                title="Controlled defect test injection (shortens prompt before synthesis to verify end-of-speech & critical phrase retention detectors)"
+              >
+                <option value="NONE">Standard Synthesis (Pass Target)</option>
+                <option value="END_TRUNCATION">Fault: Controlled Missing-Disclosure Test</option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-[#64748B] absolute right-2.5 top-1/2 transform -translate-y-1/2 pointer-events-none" />
+            </div>
           </div>
 
           {/* Primary Action Button: Generate Speech */}
@@ -698,6 +763,16 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
             )}
           </button>
         </div>
+
+        {/* Controlled Missing-Disclosure Test Helper Note */}
+        {faultMode === 'END_TRUNCATION' && (
+          <div className="bg-[#FFF5F5] border border-[#FCDADA] rounded-xl px-4 py-2.5 text-xs text-[#D94848] flex items-center gap-2.5 shadow-xs">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-[#D94848]" />
+            <div className="text-[11px] leading-relaxed">
+              <strong>Controlled missing-disclosure test:</strong> Shortens input script before synthesis to test automated end-of-speech integrity & critical phrase retention detectors (not a physical audio-buffer cutoff).
+            </div>
+          </div>
+        )}
 
         {/* D. Audio Inspection Panel with Waveform (Reference Image B) */}
         <div className="bg-white border border-[#E7ECF3] rounded-xl p-5 shadow-sm space-y-3">
@@ -883,13 +958,61 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
             </div>
 
             {/* Voice Defect Capsule Quick Action Card (Reference Image B) */}
-            <div className="bg-[#FAFBFD] border border-[#E7ECF3] rounded-xl p-4 space-y-2.5">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-md bg-[#EEF4FF] text-[#3867E8] flex items-center justify-center">
-                  <Layers className="w-3.5 h-3.5" />
+            <div className="bg-[#FAFBFD] border border-[#E7ECF3] rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-md bg-[#EEF4FF] text-[#3867E8] flex items-center justify-center">
+                    <Layers className="w-3.5 h-3.5" />
+                  </div>
+                  <h4 className="text-xs font-bold text-[#172033]">Voice Defect Capsule</h4>
                 </div>
-                <h4 className="text-xs font-bold text-[#172033]">Voice Defect Capsule</h4>
+                {activeRun?.findings && activeRun.findings.length > 0 && (
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${
+                    (activeRun.findings.find(f => f.status === 'FAIL' || f.status === 'SUSPECTED') || activeRun.findings[0]).review_state === 'HUMAN_CONFIRMED'
+                      ? 'bg-[#EAF8F0] text-[#16A36A]'
+                      : 'bg-[#FFF7E8] text-[#D99520]'
+                  }`}>
+                    {(activeRun.findings.find(f => f.status === 'FAIL' || f.status === 'SUSPECTED') || activeRun.findings[0]).review_state === 'HUMAN_CONFIRMED'
+                      ? '✓ Human Confirmed'
+                      : 'Review Required'}
+                  </span>
+                )}
               </div>
+
+              {activeRun?.findings && activeRun.findings.length > 0 && (() => {
+                const cand = activeRun.findings.find(f => f.status === 'FAIL' || f.status === 'SUSPECTED') || activeRun.findings[0];
+                const isConf = cand.review_state === 'HUMAN_CONFIRMED';
+                return (
+                  <div className="bg-white border border-[#E7ECF3] rounded-lg p-2.5 text-xs space-y-1.5 shadow-xs">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-[#172033]">{cand.check_type}</span>
+                      <span className="font-mono text-[#D94848] font-bold">{cand.severity}</span>
+                    </div>
+                    <p className="text-[11px] text-[#64748B]">
+                      {cand.reviewer_note ? (
+                        <span><strong>Note:</strong> {cand.reviewer_note}</span>
+                      ) : (
+                        <span className="italic">Audio defect detected. Listener review required before capsule creation.</span>
+                      )}
+                    </p>
+                    <button
+                      onClick={() => {
+                        setSelectedFindingToReview(cand);
+                        setReviewerNoteInput(
+                          cand.check_type === 'CRITICAL_PHRASE_MISSING' || cand.check_type === 'END_TRUNCATION_SUSPECTED'
+                            ? 'Audited Hindi audio playback; verified ₹150 penalty disclosure was cut off.'
+                            : 'Reviewed speech audio waveform and confirmed defect.'
+                        );
+                        setShowReviewModal(true);
+                      }}
+                      className="w-full mt-1 py-1 rounded bg-[#F8FAFC] hover:bg-[#EEF4FF] text-[#3867E8] border border-[#E7ECF3] hover:border-[#3867E8]/40 text-[11px] font-medium transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <Headphones className="w-3.5 h-3.5" />
+                      <span>{isConf ? 'Edit Reviewer Note' : 'Review & Confirm Defect'}</span>
+                    </button>
+                  </div>
+                );
+              })()}
 
               <p className="text-[11px] text-[#64748B] leading-relaxed">
                 Compile evidence to create a reproducible regression test.
@@ -912,6 +1035,15 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
                   </>
                 )}
               </button>
+
+              {activeRun && onNavigateToRunAnalysis && (
+                <button
+                  onClick={() => onNavigateToRunAnalysis(activeRun.id)}
+                  className="w-full py-1 text-center text-[11px] font-medium text-[#64748B] hover:text-[#3867E8] transition-colors"
+                >
+                  Open in Run Analysis →
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -1281,6 +1413,81 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
                 className="px-4 py-1.5 rounded bg-[#3867E8] text-white text-xs font-semibold hover:bg-[#2C56CE]"
               >
                 {creatingCase ? 'Creating...' : 'Create Scenario'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Human Defect Review & Confirmation Modal */}
+      {showReviewModal && selectedFindingToReview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-5 shadow-2xl border border-[#E7ECF3] space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-2 border-b border-[#E7ECF3]">
+              <h3 className="text-sm font-bold text-[#172033] flex items-center gap-2">
+                <Headphones className="w-4 h-4 text-[#3867E8]" />
+                <span>Human Reviewer Confirmation</span>
+              </h3>
+              <button
+                onClick={() => setShowReviewModal(false)}
+                className="text-[#94A3B8] hover:text-[#172033]"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="bg-[#FAFBFD] border border-[#E7ECF3] rounded-lg p-3 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-[#172033]">{selectedFindingToReview.check_type}</span>
+                  <span className="font-semibold px-2 py-0.5 rounded text-[10px] bg-[#FFF0F0] text-[#D94848]">
+                    {selectedFindingToReview.severity}
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#64748B]">
+                  Audio defect region: {selectedFindingToReview.region_start_s?.toFixed(2) ?? '—'}s to {selectedFindingToReview.region_end_s?.toFixed(2) ?? '—'}s
+                </p>
+                <p className="text-[11px] text-[#172033]">
+                  Status: <strong>{selectedFindingToReview.status}</strong> • Current Review State: <strong>{selectedFindingToReview.review_state}</strong>
+                </p>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-semibold text-[#172033] block mb-1">
+                  Human Reviewer Audio Observation Note:
+                </label>
+                <textarea
+                  rows={3}
+                  value={reviewerNoteInput}
+                  onChange={(e) => setReviewerNoteInput(e.target.value)}
+                  placeholder="e.g. Listened to Hindi playback: confirmed ₹150 penalty disclosure was cut off at sentence end."
+                  className="w-full p-2.5 bg-[#F8FAFC] border border-[#E7ECF3] rounded-lg text-xs text-[#172033] focus:outline-none focus:border-[#3867E8]"
+                />
+                <span className="text-[10px] text-[#64748B] block mt-1">
+                  *Backend Phase 1C records your authenticated user ID in the tamper-proof audit trail.
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E7ECF3]">
+              <button
+                onClick={() => handleReviewFindingAction(false)}
+                disabled={reviewSubmitting}
+                className="px-3 py-1.5 rounded-lg border border-[#E7ECF3] text-[#64748B] hover:bg-[#F8FAFC] text-xs font-medium"
+              >
+                Mark as False Positive
+              </button>
+              <button
+                onClick={() => handleReviewFindingAction(true)}
+                disabled={reviewSubmitting}
+                className="px-4 py-1.5 rounded-lg bg-[#16A36A] hover:bg-[#128857] text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm"
+              >
+                {reviewSubmitting ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" />
+                )}
+                <span>Confirm Defect (HUMAN_CONFIRMED)</span>
               </button>
             </div>
           </div>

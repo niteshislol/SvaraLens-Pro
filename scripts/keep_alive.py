@@ -115,8 +115,11 @@ def main():
     parser.add_argument("--start-hour", type=int, default=8, help="Active window start hour 0-23 (default: 8)")
     parser.add_argument("--end-hour", type=int, default=18, help="Active window end hour 0-23 (default: 18)")
     parser.add_argument("--interval", type=int, default=14, help="Minutes between pings (default: 14)")
-    parser.add_argument("--tz-offset", type=float, default=DEFAULT_TZ_OFFSET_HOURS, help="Timezone offset hours (default: +5.5 for IST)")
+    parser.add_argument("--utc", action="store_true", help="Use UTC timezone (equivalent to --tz-offset 0)")
+    parser.add_argument("--tz-offset", type=float, default=DEFAULT_TZ_OFFSET_HOURS, help="Timezone offset hours (default: +5.5 for IST, use 0 for UTC)")
     args = parser.parse_args()
+
+    tz_offset = 0.0 if args.utc else args.tz_offset
 
     if args.once:
         run_single_ping(args.url)
@@ -126,7 +129,7 @@ def main():
             start_hour=args.start_hour,
             end_hour=args.end_hour,
             interval_mins=args.interval,
-            tz_offset=args.tz_offset
+            tz_offset=tz_offset
         )
 
 
