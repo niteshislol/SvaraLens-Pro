@@ -33,6 +33,10 @@ SKIP_EXTENSIONS = {
     ".ico", ".svg", ".pyc", ".lock"
 }
 
+SKIP_FILENAMES = {
+    ".env", ".env.local", ".env.development.local", ".env.production.local"
+}
+
 
 def scan_text(text: str, location_desc: str) -> List[str]:
     findings = []
@@ -103,6 +107,8 @@ def main():
         if not path.is_file():
             continue
         if SKIP_DIRS & set(path.parts):
+            continue
+        if path.name in SKIP_FILENAMES:
             continue
         if path.suffix.lower() in SKIP_EXTENSIONS and path.suffix.lower() != ".zip":
             continue
