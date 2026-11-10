@@ -63,18 +63,27 @@ export function logoutUser() {
   setStoredUser(null);
 }
 
+let authPromise: Promise<string> | null = null;
+
 export async function ensureAuthToken(): Promise<string> {
   let token = getAuthToken();
   if (token) return token;
 
-  // Local demo session initialisation (offline demo convenience)
-  try {
-    const data = await loginUser('admin', 'AdminPassword@123!');
-    return data.access_token || '';
-  } catch (err) {
-    console.warn('Session initialisation notice: please sign in', err);
-  }
-  return '';
+  if (authPromise) return authPromise;
+
+  authPromise = (async () => {
+    try {
+      const data = await loginUser('admin', 'AdminPassword@123!');
+      return data.access_token || '';
+    } catch (err) {
+      console.warn('Session initialisation notice: please sign in', err);
+      return '';
+    } finally {
+      authPromise = null;
+    }
+  })();
+
+  return authPromise;
 }
 
 export async function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -90,8 +99,9 @@ export async function authFetch(input: RequestInfo | URL, init?: RequestInit): P
     setAuthToken(null);
     token = await ensureAuthToken();
     if (token) {
-      headers.set('Authorization', `Bearer ${token}`);
-      res = await fetch(input, { ...init, headers });
+      const retryHeaders = new Headers(init?.headers || {});
+      retryHeaders.set('Authorization', `Bearer ${token}`);
+      res = await fetch(input, { ...init, headers: retryHeaders });
     }
   }
   return res;
@@ -112,7 +122,11 @@ export async function fetchSuiteSummary(suiteId: string = 'suite-insurance-hi'):
 export async function fetchTestCases(suiteId?: string): Promise<TestCase[]> {
   const url = suiteId ? `${API_BASE}/cases?suite_id=${suiteId}` : `${API_BASE}/cases`;
   const res = await authFetch(url);
-  if (!res.ok) throw new Error('Failed to fetch test cases');
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    const message = errorData?.error?.message || errorData?.error?.detail || errorData?.detail || `Failed to fetch test cases (HTTP ${res.status})`;
+    throw new Error(message);
+  }
   return res.json();
 }
 
@@ -160,7 +174,8 @@ export async function triggerGenerateRun(
   const res = await authFetch(url, { method: 'POST' });
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.detail || `Failed to generate Timbre run (HTTP ${res.status})`);
+    const message = errorData?.error?.message || errorData?.error?.detail || errorData?.detail || `Failed to generate Timbre run (HTTP ${res.status})`;
+    throw new Error(message);
   }
   return res.json();
 }

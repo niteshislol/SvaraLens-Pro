@@ -83,12 +83,15 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
   const [pinSeverity, setPinSeverity] = useState<string>('CRITICAL');
   const [pinNote, setPinNote] = useState<string>('Audible syllable drop on closing disclosure');
 
-  // Load Test Cases (Latest Scenarios on upper side)
-  const loadCases = async () => {
+  // Load Test Cases (Latest Scenarios on upper side, with fallback & auto-retry)
+  const loadCases = async (retryCount = 0) => {
     try {
       setLoadingCases(true);
-      const data = await fetchTestCases('suite-insurance-hi');
-      const sorted = [...data].sort((a, b) => {
+      let data = await fetchTestCases('suite-insurance-hi');
+      if (!data || data.length === 0) {
+        data = await fetchTestCases();
+      }
+      const sorted = [...(data || [])].sort((a, b) => {
         if (a.created_at && b.created_at) {
           const diff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
           if (diff !== 0) return diff;
@@ -103,6 +106,9 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
       }
     } catch (err) {
       console.error('Failed to load test cases', err);
+      if (retryCount < 2) {
+        setTimeout(() => loadCases(retryCount + 1), 1500);
+      }
     } finally {
       setLoadingCases(false);
     }
@@ -180,7 +186,10 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
 
   // Handle Speech Generation
   const handleGenerate = async () => {
-    if (!activeCase) return;
+    if (!activeCase) {
+      alert('Please select a scenario first to generate speech.');
+      return;
+    }
     try {
       setGenerating(true);
       // Clean voice name (strip description)
@@ -477,8 +486,16 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
               <span>Loading scenarios...</span>
             </div>
           ) : filteredCases.length === 0 ? (
-            <div className="p-4 text-center text-xs text-[#94A3B8]">
-              No matching scenarios found.
+            <div className="p-4 text-center text-xs text-[#94A3B8] space-y-2">
+              <div>No matching scenarios found.</div>
+              {cases.length === 0 && (
+                <button
+                  onClick={() => loadCases()}
+                  className="px-3 py-1 text-[11px] font-medium text-[#3867E8] bg-[#EEF4FF] hover:bg-[#DCE7FD] rounded-md transition-colors"
+                >
+                  Retry Loading Scenarios
+                </button>
+              )}
             </div>
           ) : (
             filteredCases.map(c => {

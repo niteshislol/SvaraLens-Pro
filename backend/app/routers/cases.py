@@ -3,6 +3,7 @@ import uuid
 import csv
 import io
 import shutil
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -15,12 +16,15 @@ from ..schemas import (
 )
 from ..config import settings
 from ..gnani import get_gnani_client
+from ..gnani.client import TranscriptResult
 from ..audio.normalize import normalize_to_standard_wav
 from ..audio.analyze import analyze_audio_file
 from ..checks.runner import run_all_checks
 from ..capsule.compiler import compute_sha256
 from ..auth.dependencies import get_current_user, require_not_auditor
 from ..audit import record_audit_event
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 
@@ -605,139 +609,154 @@ async def generate_and_analyze(
     if not c:
         raise HTTPException(status_code=404, detail="Test case not found")
 
+    # Parameter sanitization (prevent FastAPI Query objects or empty strings from polluting payloads)
+    model_name = tts_model if isinstance(tts_model, str) and tts_model.strip() else (getattr(c, "tts_model", None) or "timbre-v3.0")
+    voice_name = tts_voice if isinstance(tts_voice, str) and tts_voice.strip() else (c.voice or ("Shivani" if model_name == "timbre-v3.0" else "Nalini"))
+    fault_val = injected_fault if isinstance(injected_fault, str) and injected_fault.strip() else None
+
     gnani_client = get_gnani_client()
     run_id = f"RUN-{uuid.uuid4().hex[:8].upper()}"
     source = "MOCK_FIXTURE" if settings.MOCK_MODE or not settings.GNANI_API_KEY else "TIMBRE_LIVE"
 
-    model_name = tts_model or getattr(c, "tts_model", None) or "timbre-v3.0"
-    voice_name = tts_voice or c.voice or ("Shivani" if model_name == "timbre-v3.0" else "Nalini")
-
     try:
-        audio_bytes = await gnani_client.synthesize(
-            text=c.reference_text,
-            language=c.language,
-            voice=voice_name,
-            speed=c.speed,
-            case_id=c.id,
-            injected_fault=injected_fault,
-            model=model_name
-        )
-    except Exception as e:
-        logger.warning(f"Live Timbre synthesis error: {e}. Falling back to deterministic audio fixture...")
-        from ..gnani.mock import MockGnaniClient
-        mock_c = MockGnaniClient()
         try:
-            audio_bytes = await mock_c.synthesize(
+            audio_bytes = await gnani_client.synthesize(
                 text=c.reference_text,
                 language=c.language,
                 voice=voice_name,
                 speed=c.speed,
                 case_id=c.id,
-                injected_fault=injected_fault,
+                injected_fault=fault_val,
                 model=model_name
             )
-            source = "MOCK_FIXTURE"
-        except Exception:
-            raise HTTPException(status_code=502, detail=f"Timbre ({model_name}) synthesis failed: {str(e)}")
+        except Exception as e:
+            logger.warning(f"Live Timbre synthesis error: {e}. Falling back to deterministic audio fixture...")
+            from ..gnani.mock import MockGnaniClient
+            mock_c = MockGnaniClient()
+            try:
+                audio_bytes = await mock_c.synthesize(
+                    text=c.reference_text,
+                    language=c.language,
+                    voice=voice_name,
+                    speed=c.speed,
+                    case_id=c.id,
+                    injected_fault=fault_val,
+                    model=model_name
+                )
+                source = "MOCK_FIXTURE"
+            except Exception as inner_e:
+                logger.error(f"Fallback synthesis error: {inner_e}")
+                raise HTTPException(status_code=502, detail=f"Timbre ({model_name}) synthesis failed: {str(e)}")
 
-    temp_wav = settings.AUDIO_STORE_PATH / f"{run_id}_raw.wav"
-    norm_wav = settings.AUDIO_STORE_PATH / f"{run_id}.wav"
-    with open(temp_wav, "wb") as f:
-        f.write(audio_bytes)
+        temp_wav = settings.AUDIO_STORE_PATH / f"{run_id}_raw.wav"
+        norm_wav = settings.AUDIO_STORE_PATH / f"{run_id}.wav"
+        try:
+            with open(temp_wav, "wb") as f:
+                f.write(audio_bytes)
 
-    sr, channels, duration_s = normalize_to_standard_wav(str(temp_wav), str(norm_wav), target_sr=16000)
-    temp_wav.unlink(missing_ok=True)
-    audio_sha256 = compute_sha256(str(norm_wav))
+            sr, channels, duration_s = normalize_to_standard_wav(str(temp_wav), str(norm_wav), target_sr=16000)
+        finally:
+            temp_wav.unlink(missing_ok=True)
 
-    acoustic_data = analyze_audio_file(str(norm_wav))
+        audio_sha256 = compute_sha256(str(norm_wav))
+        acoustic_data = analyze_audio_file(str(norm_wav))
 
-    try:
-        dual_asr = await gnani_client.transcribe_dual_asr(
-            audio_path=str(norm_wav),
-            language=c.language,
-            reference_text=c.reference_text
+        try:
+            dual_asr = await gnani_client.transcribe_dual_asr(
+                audio_path=str(norm_wav),
+                language=c.language,
+                reference_text=c.reference_text
+            )
+            stt_res = dual_asr.get("primary_result")
+            if not hasattr(stt_res, "text") or not isinstance(stt_res, TranscriptResult):
+                raise RuntimeError("Dual ASR primary result not a TranscriptResult")
+        except Exception as e:
+            logger.warning(f"Live Prisma transcription error: {e}. Falling back to deterministic jury...")
+            from ..gnani.mock import MockGnaniClient
+            mock_c = MockGnaniClient()
+            dual_asr = await mock_c.transcribe_dual_asr(
+                audio_path=str(norm_wav),
+                language=c.language,
+                reference_text=c.reference_text
+            )
+            stt_res = dual_asr.get("primary_result")
+
+        transcript_text = getattr(stt_res, "text", "") or ""
+        words_list = getattr(stt_res, "words", []) or []
+        raw_stt = getattr(stt_res, "raw_json", {}) or {}
+
+        critical_phrases = json.loads(c.critical_phrases_json) if c.critical_phrases_json else []
+        check_results = run_all_checks(
+            reference_text=c.reference_text,
+            critical_phrases=critical_phrases,
+            transcript_text=transcript_text,
+            audio_analysis=acoustic_data,
+            pace_min=c.pace_min,
+            pace_max=c.pace_max
         )
-        stt_res = dual_asr["primary_result"]
-        if not hasattr(stt_res, "text") or not isinstance(stt_res, TranscriptResult):
-            raise RuntimeError("Dual ASR primary result not a TranscriptResult")
-    except Exception as e:
-        logger.warning(f"Live Prisma transcription error: {e}. Falling back to deterministic jury...")
-        from ..gnani.mock import MockGnaniClient
-        mock_c = MockGnaniClient()
-        dual_asr = await mock_c.transcribe_dual_asr(
-            audio_path=str(norm_wav),
-            language=c.language,
-            reference_text=c.reference_text
-        )
-        stt_res = dual_asr["primary_result"]
 
-    critical_phrases = json.loads(c.critical_phrases_json) if c.critical_phrases_json else []
-    check_results = run_all_checks(
-        reference_text=c.reference_text,
-        critical_phrases=critical_phrases,
-        transcript_text=stt_res.text,
-        audio_analysis=acoustic_data,
-        pace_min=c.pace_min,
-        pace_max=c.pace_max
-    )
-
-    db_run = Run(
-        id=run_id,
-        org_id=current_user.org_id,
-        case_id=c.id,
-        source=source,
-        status="ANALYSED",
-        audio_path=str(norm_wav),
-        audio_sha256=audio_sha256,
-        duration_s=acoustic_data.get("duration_s", duration_s),
-        sample_rate=16000,
-        channels=1,
-        tts_model=model_name,
-        tts_voice=voice_name,
-        transcript_text=stt_res.text,
-        transcript_words_json=json.dumps(stt_res.words, ensure_ascii=False),
-        stt_raw_json=json.dumps(stt_res.raw_json, ensure_ascii=False),
-        stt_dual_results_json=json.dumps({
-            "prisma_v25": dual_asr.get("prisma_v25"),
-            "prisma_v30": dual_asr.get("prisma_v30"),
-            "consensus_score": dual_asr.get("consensus_score", 100.0),
-            "both_agree": dual_asr.get("both_agree", True)
-        }, ensure_ascii=False),
-        tts_request_json=json.dumps({"model": model_name, "voice": voice_name, "speed": c.speed, "language": c.language}),
-        metrics_json=json.dumps(check_results["metrics"], ensure_ascii=False),
-        injected_fault=injected_fault
-    )
-    db.add(db_run)
-
-    for idx, f in enumerate(check_results["findings"]):
-        finding_id = f"FND-{run_id}-{idx+1:02d}"
-        db_finding = Finding(
-            id=finding_id,
+        db_run = Run(
+            id=run_id,
             org_id=current_user.org_id,
-            run_id=run_id,
-            check_type=f.check_type,
-            status=f.status,
-            review_state="AUTO_DETECTED",
-            severity=f.severity,
-            evidence_json=json.dumps(f.evidence, ensure_ascii=False),
-            region_start_s=f.region_start_s,
-            region_end_s=f.region_end_s
+            case_id=c.id,
+            source=source,
+            status="ANALYSED",
+            audio_path=str(norm_wav),
+            audio_sha256=audio_sha256,
+            duration_s=acoustic_data.get("duration_s", duration_s),
+            sample_rate=16000,
+            channels=1,
+            tts_model=model_name,
+            tts_voice=voice_name,
+            transcript_text=transcript_text,
+            transcript_words_json=json.dumps(words_list, ensure_ascii=False),
+            stt_raw_json=json.dumps(raw_stt, ensure_ascii=False),
+            stt_dual_results_json=json.dumps({
+                "prisma_v25": dual_asr.get("prisma_v25"),
+                "prisma_v30": dual_asr.get("prisma_v30"),
+                "consensus_score": dual_asr.get("consensus_score", 100.0),
+                "both_agree": dual_asr.get("both_agree", True)
+            }, ensure_ascii=False),
+            tts_request_json=json.dumps({"model": model_name, "voice": voice_name, "speed": c.speed, "language": c.language}),
+            metrics_json=json.dumps(check_results["metrics"], ensure_ascii=False),
+            injected_fault=fault_val
         )
-        db.add(db_finding)
+        db.add(db_run)
 
-    db.flush()
-    record_audit_event(
-        db=db,
-        actor=current_user,
-        action="RUN_GENERATED",
-        resource_type="TestCase",
-        resource_id=c.id,
-        details={"run_id": run_id, "model": model_name, "voice": voice_name},
-        request=request
-    )
-    db.commit()
-    db.refresh(db_run)
-    return {"run_id": run_id, "status": "ANALYSED", "findings_count": len(check_results["findings"])}
+        for idx, f in enumerate(check_results["findings"]):
+            finding_id = f"FND-{run_id}-{idx+1:02d}"
+            db_finding = Finding(
+                id=finding_id,
+                org_id=current_user.org_id,
+                run_id=run_id,
+                check_type=f.check_type,
+                status=f.status,
+                review_state="AUTO_DETECTED",
+                severity=f.severity,
+                evidence_json=json.dumps(f.evidence, ensure_ascii=False),
+                region_start_s=f.region_start_s,
+                region_end_s=f.region_end_s
+            )
+            db.add(db_finding)
+
+        db.flush()
+        record_audit_event(
+            db=db,
+            actor=current_user,
+            action="RUN_GENERATED",
+            resource_type="TestCase",
+            resource_id=c.id,
+            details={"run_id": run_id, "model": model_name, "voice": voice_name},
+            request=request
+        )
+        db.commit()
+        db.refresh(db_run)
+        return {"run_id": run_id, "status": "ANALYSED", "findings_count": len(check_results["findings"])}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Unexpected error in generate_and_analyze: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Speech generation pipeline failed: {str(exc)}")
 
 
 @router.post("/{id}/runs/upload")
