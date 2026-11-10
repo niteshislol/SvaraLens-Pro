@@ -81,6 +81,38 @@ def get_capsule(
     )
 
 
+@router.get("/{id}/runs", response_model=List[RegressionRunRead])
+def get_capsule_regression_runs(
+    id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Retrieves all regression runs associated with a capsule, newest first."""
+    capsule = db.query(Capsule).filter(Capsule.id == id, Capsule.org_id == current_user.org_id).first()
+    if not capsule:
+        raise HTTPException(status_code=404, detail="Capsule not found")
+
+    rrs = db.query(RegressionRun).filter(
+        RegressionRun.capsule_id == id,
+        RegressionRun.org_id == current_user.org_id
+    ).order_by(RegressionRun.created_at.desc()).all()
+
+    results = []
+    for r in rrs:
+        assertions = json.loads(r.assertion_results_json) if r.assertion_results_json else []
+        results.append(RegressionRunRead(
+            id=r.id,
+            capsule_id=r.capsule_id,
+            run_id=r.run_id,
+            verdict=r.verdict,
+            assertion_results=[AssertionComparison(**a) for a in assertions],
+            approved_by=r.approved_by,
+            approved_at=r.approved_at,
+            created_at=r.created_at
+        ))
+    return results
+
+
 @router.get("/{id}/validate", response_model=CapsuleIntegrityResponse)
 def validate_capsule_integrity(
     id: str,

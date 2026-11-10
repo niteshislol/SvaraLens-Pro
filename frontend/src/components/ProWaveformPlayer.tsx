@@ -86,6 +86,15 @@ export const ProWaveformPlayer: React.FC<ProWaveformPlayerProps> = ({
     };
   }, [comparisonAudioUrl]);
 
+  // Auto-switch to Track B when comparison audio becomes available (e.g. after regression run)
+  useEffect(() => {
+    if (comparisonAudioUrl) {
+      setActiveTrackMode('B');
+    } else {
+      setActiveTrackMode('A');
+    }
+  }, [comparisonAudioUrl]);
+
   // Audio elements sync
   useEffect(() => {
     const audio = new Audio(primaryAudioUrl);
@@ -98,41 +107,86 @@ export const ProWaveformPlayer: React.FC<ProWaveformPlayerProps> = ({
       }
     };
 
-    audio.onended = () => setIsPlaying(false);
+    audio.onended = () => {
+      if (activeTrackMode !== 'B') setIsPlaying(false);
+    };
 
     let compAudio: HTMLAudioElement | null = null;
     if (comparisonAudioUrl) {
       compAudio = new Audio(comparisonAudioUrl);
       compAudioRef.current = compAudio;
+      compAudio.onended = () => {
+        if (activeTrackMode === 'B') setIsPlaying(false);
+      };
     }
 
     return () => {
       audio.pause();
       if (compAudio) compAudio.pause();
     };
-  }, [primaryAudioUrl, comparisonAudioUrl]);
+  }, [primaryAudioUrl, comparisonAudioUrl, activeTrackMode]);
+
+  // Dynamically update audio mute and volume states when switching track mode or volume
+  useEffect(() => {
+    const audioA = audioRef.current;
+    const audioB = compAudioRef.current;
+    if (!audioA) return;
+
+    if (activeTrackMode === 'B') {
+      audioA.muted = true;
+      if (audioB) {
+        audioB.muted = isMuted;
+        audioB.volume = volume;
+        audioB.playbackRate = playbackSpeed;
+        if (isPlaying) {
+          audioB.currentTime = audioA.currentTime;
+          audioB.play().catch(() => {});
+        }
+      }
+    } else {
+      audioA.muted = isMuted;
+      audioA.volume = volume;
+      audioA.playbackRate = playbackSpeed;
+      if (audioB) {
+        audioB.muted = true;
+        if (isPlaying) {
+          audioB.currentTime = audioA.currentTime;
+          audioB.play().catch(() => {});
+        }
+      }
+    }
+  }, [activeTrackMode, isMuted, volume, playbackSpeed, isPlaying]);
 
   // Handle Playback toggling
   const togglePlay = useCallback(() => {
-    if (!audioRef.current) return;
+    const audioA = audioRef.current;
+    const audioB = compAudioRef.current;
+    if (!audioA) return;
+
     if (isPlaying) {
-      audioRef.current.pause();
-      if (compAudioRef.current) compAudioRef.current.pause();
+      audioA.pause();
+      if (audioB) audioB.pause();
       setIsPlaying(false);
     } else {
-      audioRef.current.playbackRate = playbackSpeed;
-      if (activeTrackMode === 'B' && compAudioRef.current) {
-        audioRef.current.muted = true;
-        compAudioRef.current.muted = isMuted;
-        compAudioRef.current.volume = volume;
-        compAudioRef.current.play().catch(() => {});
-        audioRef.current.play().catch(() => {});
+      audioA.playbackRate = playbackSpeed;
+      if (audioB) audioB.playbackRate = playbackSpeed;
+
+      if (activeTrackMode === 'B' && audioB) {
+        audioA.muted = true;
+        audioB.muted = isMuted;
+        audioB.volume = volume;
+        audioB.currentTime = audioA.currentTime;
+        audioB.play().catch(() => {});
+        audioA.play().catch(() => {});
       } else {
-        audioRef.current.muted = isMuted;
-        audioRef.current.volume = volume;
-        if (compAudioRef.current) compAudioRef.current.muted = true;
-        audioRef.current.play().catch(() => {});
-        if (compAudioRef.current) compAudioRef.current.play().catch(() => {});
+        audioA.muted = isMuted;
+        audioA.volume = volume;
+        if (audioB) {
+          audioB.muted = true;
+          audioB.currentTime = audioA.currentTime;
+          audioB.play().catch(() => {});
+        }
+        audioA.play().catch(() => {});
       }
       setIsPlaying(true);
     }
@@ -147,16 +201,24 @@ export const ProWaveformPlayer: React.FC<ProWaveformPlayerProps> = ({
         togglePlay();
       } else if (e.code === 'KeyJ') {
         if (audioRef.current) {
-          audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - 1.0);
+          const t = Math.max(0, audioRef.current.currentTime - 1.0);
+          audioRef.current.currentTime = t;
+          if (compAudioRef.current) compAudioRef.current.currentTime = t;
+          setCurrentTime(t);
         }
       } else if (e.code === 'KeyL') {
         if (audioRef.current) {
-          audioRef.current.currentTime = Math.min(duration, audioRef.current.currentTime + 1.0);
+          const t = Math.min(duration, audioRef.current.currentTime + 1.0);
+          audioRef.current.currentTime = t;
+          if (compAudioRef.current) compAudioRef.current.currentTime = t;
+          setCurrentTime(t);
         }
       } else if (e.code === 'Digit1') {
         setActiveTrackMode('A');
       } else if (e.code === 'Digit2' && comparisonAudioUrl) {
         setActiveTrackMode('B');
+      } else if (e.code === 'Digit3' && comparisonAudioUrl) {
+        setActiveTrackMode('OVERLAY');
       }
     };
 
@@ -304,6 +366,9 @@ export const ProWaveformPlayer: React.FC<ProWaveformPlayerProps> = ({
       audioRef.current.currentTime = clickTime;
       setCurrentTime(clickTime);
     }
+    if (compAudioRef.current) {
+      compAudioRef.current.currentTime = clickTime;
+    }
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -345,6 +410,16 @@ export const ProWaveformPlayer: React.FC<ProWaveformPlayerProps> = ({
           onMouseUp={handleCanvasMouseUp}
           className="w-full h-24 cursor-crosshair block"
         />
+
+        {/* Track State Pill */}
+        {comparisonAudioUrl && (
+          <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5 px-2 py-0.5 rounded bg-white/95 backdrop-blur-sm border border-[#E7ECF3] shadow-xs text-[10px] font-mono">
+            <span className={`w-2 h-2 rounded-full ${activeTrackMode === 'A' ? 'bg-[#3867E8]' : activeTrackMode === 'B' ? 'bg-[#16A36A]' : 'bg-[#7856D9]'}`} />
+            <span className="font-semibold text-[#172033]">
+              {activeTrackMode === 'A' ? primaryLabel : activeTrackMode === 'B' ? comparisonLabel : 'Dual-Track Overlay (A vs B)'}
+            </span>
+          </div>
+        )}
 
         {/* P1 Defect Pin Marker Pill Overlay (Reference B) */}
         {defectPins.length > 0 && duration > 0 && (
@@ -446,19 +521,30 @@ export const ProWaveformPlayer: React.FC<ProWaveformPlayerProps> = ({
             <div className="flex items-center bg-[#F4F7FB] rounded p-0.5 border border-[#E7ECF3] text-[11px] font-mono">
               <button
                 onClick={() => setActiveTrackMode('A')}
+                title="Switch to Track A (Failing Clip)"
                 className={`px-2 py-0.5 rounded transition-colors ${
-                  activeTrackMode === 'A' ? 'bg-[#3867E8] text-white font-bold' : 'text-[#64748B]'
+                  activeTrackMode === 'A' ? 'bg-[#3867E8] text-white font-bold' : 'text-[#64748B] hover:text-[#172033]'
                 }`}
               >
                 Track A
               </button>
               <button
                 onClick={() => setActiveTrackMode('B')}
+                title="Switch to Track B (Fixed Baseline)"
                 className={`px-2 py-0.5 rounded transition-colors ${
-                  activeTrackMode === 'B' ? 'bg-[#16A36A] text-white font-bold' : 'text-[#64748B]'
+                  activeTrackMode === 'B' ? 'bg-[#16A36A] text-white font-bold' : 'text-[#64748B] hover:text-[#172033]'
                 }`}
               >
                 Track B
+              </button>
+              <button
+                onClick={() => setActiveTrackMode('OVERLAY')}
+                title="Overlay Track A & B waveforms"
+                className={`px-2 py-0.5 rounded transition-colors ${
+                  activeTrackMode === 'OVERLAY' ? 'bg-[#7856D9] text-white font-bold' : 'text-[#64748B] hover:text-[#172033]'
+                }`}
+              >
+                Overlay
               </button>
             </div>
           )}

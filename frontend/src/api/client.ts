@@ -186,9 +186,10 @@ export function getAudioUrl(runOrPath: string): string {
   if (!runOrPath) return '';
   if (runOrPath.startsWith('http')) return runOrPath;
 
-  // Extract RUN-XXXX identifier from string or path if present
-  const match = runOrPath.match(/(RUN-[A-Za-z0-9_-]+)/i);
-  const cleanId = match ? match[1] : runOrPath.replace(/^.*[\\\/]/, '').replace(/\.wav$/i, '');
+  // Extract clean run ID without stripping REG- or ARENA- prefixes
+  const filename = runOrPath.replace(/^.*[\\\/]/, '').replace(/\.wav$/i, '');
+  const match = filename.match(/((?:REG-)?RUN-[A-Za-z0-9_-]+|ARENA-[A-Za-z0-9_-]+)/i);
+  const cleanId = match ? match[1] : filename;
   const token = getAuthToken();
   const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
   return `${API_BASE}/runs/${cleanId}/audio${tokenQuery}`;
@@ -234,6 +235,12 @@ export async function fetchCapsules(): Promise<Capsule[]> {
 export async function fetchCapsule(id: string): Promise<Capsule> {
   const res = await authFetch(`${API_BASE}/capsules/${id}`);
   if (!res.ok) throw new Error('Failed to fetch capsule');
+  return res.json();
+}
+
+export async function fetchCapsuleRegressionRuns(capsuleId: string): Promise<RegressionRun[]> {
+  const res = await authFetch(`${API_BASE}/capsules/${capsuleId}/runs`);
+  if (!res.ok) throw new Error('Failed to fetch capsule regression runs');
   return res.json();
 }
 

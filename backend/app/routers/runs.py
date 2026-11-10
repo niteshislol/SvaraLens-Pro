@@ -22,11 +22,11 @@ def get_run_detail(
     db: Session = Depends(get_db)
 ):
     """Retrieves full run detail. Scoped strictly to caller's organisation (404 on cross-org)."""
-    run = db.query(Run).filter(Run.id == id, Run.org_id == current_user.org_id).first()
+    run = db.query(Run).filter((Run.id == id) | (Run.id == f"REG-{id}"), Run.org_id == current_user.org_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    findings = db.query(Finding).filter(Finding.run_id == id, Finding.org_id == current_user.org_id).all()
+    findings = db.query(Finding).filter(Finding.run_id == run.id, Finding.org_id == current_user.org_id).all()
     parsed_findings = []
     for f in findings:
         ev = json.loads(f.evidence_json) if f.evidence_json else {}
@@ -108,7 +108,7 @@ def add_defect_pin(
 ):
     """Adds a defect pin to a run. Scoped to organisation.
     Auditors are blocked from mutating defect pins."""
-    run = db.query(Run).filter(Run.id == id, Run.org_id == current_user.org_id).first()
+    run = db.query(Run).filter((Run.id == id) | (Run.id == f"REG-{id}"), Run.org_id == current_user.org_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
 
@@ -154,7 +154,7 @@ def remove_defect_pin(
     db: Session = Depends(get_db)
 ):
     """Removes a defect pin from a run."""
-    run = db.query(Run).filter(Run.id == id, Run.org_id == current_user.org_id).first()
+    run = db.query(Run).filter((Run.id == id) | (Run.id == f"REG-{id}"), Run.org_id == current_user.org_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
 
@@ -184,7 +184,7 @@ def get_run_audio(
 ):
     """Serve audio for a run by RUN ID only.
     Enforces authentication and organisation ownership (404 on foreign tenant)."""
-    run = db.query(Run).filter(Run.id == id, Run.org_id == current_user.org_id).first()
+    run = db.query(Run).filter((Run.id == id) | (Run.id == f"REG-{id}"), Run.org_id == current_user.org_id).first()
     if not run or not run.audio_path:
         raise HTTPException(status_code=404, detail="Audio not found")
 

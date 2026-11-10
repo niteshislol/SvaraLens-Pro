@@ -4,7 +4,8 @@ import {
   fetchTestCases, fetchRun, triggerGenerateRun, fetchLatestRunForCase,
   createTestCase, importCasesCsv, addDefectPin, removeDefectPin,
   updateFinding, compileCapsule, rerunRegression, approveRegression,
-  getAudioUrl, duplicateTestCase, validateCapsuleIntegrity
+  getAudioUrl, duplicateTestCase, validateCapsuleIntegrity,
+  fetchCapsules, fetchCapsuleRegressionRuns
 } from '../api/client';
 import { ProWaveformPlayer } from '../components/ProWaveformPlayer';
 import { DualAsrJury } from '../components/DualAsrJury';
@@ -131,6 +132,40 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
       .catch(() => {
         setActiveRun(null);
         setHighlightRegion(undefined);
+      });
+
+    // Check for existing capsule & regression runs for this case so Track B is loaded
+    fetchCapsules()
+      .then(caps => {
+        const caseCap = caps.find(c => c.case_id === activeCase.id);
+        if (caseCap) {
+          setActiveCapsule(caseCap);
+          fetchCapsuleRegressionRuns(caseCap.id)
+            .then(rrs => {
+              if (rrs && rrs.length > 0) {
+                setRegressionRun(rrs[0]);
+                fetchRun(rrs[0].run_id)
+                  .then(setFixedRun)
+                  .catch(() => setFixedRun(null));
+              } else {
+                setRegressionRun(null);
+                setFixedRun(null);
+              }
+            })
+            .catch(() => {
+              setRegressionRun(null);
+              setFixedRun(null);
+            });
+        } else {
+          setActiveCapsule(null);
+          setRegressionRun(null);
+          setFixedRun(null);
+        }
+      })
+      .catch(() => {
+        setActiveCapsule(null);
+        setRegressionRun(null);
+        setFixedRun(null);
       });
   }, [selectedCaseId]);
 
