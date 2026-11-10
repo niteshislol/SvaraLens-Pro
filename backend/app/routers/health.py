@@ -36,3 +36,15 @@ def health_check(db: Session = Depends(get_db)):
         scenarios_count=scenarios_count,
         capsules_count=capsules_count
     )
+
+
+@router.get("/ping")
+def ping():
+    """Ultra-lightweight ping endpoint for Render keep-alive and uptime monitoring.
+    Executes in <2ms with zero database overhead."""
+    return {
+        "status": "ok",
+        "pong": True,
+        "service": settings.PROJECT_NAME,
+        "version": settings.VERSION
+    }

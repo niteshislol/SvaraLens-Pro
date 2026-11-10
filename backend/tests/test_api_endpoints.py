@@ -14,6 +14,16 @@ def test_health():
     assert data["timbre_model"] == "timbre-v2.5"
     assert data["prisma_model"] == "prisma-v2.5"
 
+def test_ping():
+    res = client.get("/ping")
+    assert res.status_code == 200
+    assert res.json()["status"] == "ok"
+    assert res.json()["pong"] is True
+
+    res_api = client.get("/api/ping")
+    assert res_api.status_code == 200
+    assert res_api.json()["pong"] is True
+
 def test_primary_loop_end_to_end():
     # 0. Clean up existing TC-014 if present from previous run
     check_existing = client.get("/api/cases/TC-014")

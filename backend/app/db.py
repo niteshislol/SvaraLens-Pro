@@ -178,8 +178,8 @@ def ensure_schema(bind_engine):
 
             # 6. Seed default test suite if missing
             conn.execute(text("""
-                INSERT OR IGNORE INTO suites (id, org_id, name, description, language, domain, created_at)
-                VALUES ('suite-insurance-hi', 'org-default', 'General Insurance Hindi Suite', 'Core conversational IVR and claims validation suite', 'hi-IN', 'insurance', '2026-11-10T00:00:00Z')
+                INSERT OR IGNORE INTO suites (id, org_id, name, description, created_at)
+                VALUES ('suite-insurance-hi', 'org-default', 'General Insurance Hindi Suite', 'Core conversational IVR and claims validation suite', '2026-11-10T00:00:00Z')
             """))
 
             # 7. Seed initial test cases if no test cases exist
