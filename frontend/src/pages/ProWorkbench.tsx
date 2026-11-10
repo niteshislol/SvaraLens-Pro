@@ -14,7 +14,7 @@ import {
   Plus, Search, FileText, CheckCircle2, ChevronDown,
   Layers, Pin, ArrowRight, Loader2, RefreshCw, Copy,
   Check, Download, AlertTriangle, ShieldCheck, Sparkles,
-  Cpu, Filter
+  Cpu, Filter, Activity
 } from 'lucide-react';
 
 interface ProWorkbenchProps {
@@ -296,6 +296,16 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
 
   const workflowStep = getWorkflowStep();
 
+  // Automated Checks statuses matching Reference B
+  const hasPhraseDefect = activeRun?.findings?.some(f => f.check_type === 'CRITICAL_PHRASE_MISSING');
+  const hasTruncationDefect = activeRun?.findings?.some(f => f.check_type === 'END_TRUNCATION') ||
+                              activeRun?.defect_pins?.some(p => p.category === 'END_TRUNCATION');
+  const hasSilenceDefect = activeRun?.findings?.some(f => f.check_type === 'UNEXPECTED_SILENCE' || f.check_type === 'PROSODY_PAUSE') ||
+                           activeRun?.defect_pins?.some(p => p.category === 'PROSODY_PAUSE');
+  const hasClippingDefect = activeRun?.findings?.some(f => f.check_type === 'CLIPPING') ||
+                            activeRun?.defect_pins?.some(p => p.category === 'CLIPPING') ||
+                            ((activeRun?.metrics?.clip_ratio || 0) > 0.001);
+
   return (
     <div className="flex-1 flex min-h-0 h-full overflow-hidden bg-[#F8FAFC]">
       {/* ============================================================== */}
@@ -571,7 +581,7 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
               </div>
 
               <p className="font-devanagari text-xs text-[#172033] leading-relaxed pl-7">
-                "{activeCase.reference_text}"
+                {activeCase.reference_text}
               </p>
 
               {/* Mandatory Tokens Chips */}
@@ -723,6 +733,7 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
                 : 'border-transparent text-[#64748B] hover:text-[#172033]'
             }`}
           >
+            <Activity className="w-3.5 h-3.5" />
             <span>Radar</span>
           </button>
 
@@ -751,19 +762,89 @@ export const ProWorkbench: React.FC<ProWorkbenchProps> = ({
           </button>
         </div>
 
-        {/* Tab 1: Radar Content (Reference Image A) */}
+        {/* Tab 1: Radar Content (Reference Images A & B) */}
         {rightTab === 'radar' && (
-          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-5 overscroll-y-contain">
-            <div>
-              <h3 className="text-xs font-bold text-[#172033] uppercase tracking-wider mb-2">
-                Audio Health & Quality
-              </h3>
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 overscroll-y-contain">
+            {/* Audio Health Gauge & Side Metrics (Reference Image A) */}
+            <CompactAudioHealth
+              run={activeRun}
+              onOpenDetails={() => setIsDetailsDrawerOpen(true)}
+            />
 
-              {/* Compact Circular Health Gauge & Side Metrics */}
-              <CompactAudioHealth
-                run={activeRun}
-                onOpenDetails={() => setIsDetailsDrawerOpen(true)}
-              />
+            {/* Automated Checks (Reference Image B) */}
+            <div className="pt-3 border-t border-[#E7ECF3] space-y-2.5">
+              <h4 className="text-xs font-bold text-[#172033]">
+                Automated Checks
+              </h4>
+              <div className="space-y-2 text-xs">
+                {/* Critical Phrase Retention */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-[#172033]">
+                    {hasPhraseDefect ? (
+                      <span className="w-4 h-4 rounded-full bg-[#FFF0F0] text-[#D94848] flex items-center justify-center text-[10px] font-bold">✕</span>
+                    ) : (
+                      <span className="w-4 h-4 rounded-full bg-[#EAF8F0] text-[#16A36A] flex items-center justify-center text-[10px] font-bold">✓</span>
+                    )}
+                    <span className="text-xs text-[#172033]">Critical Phrase Retention</span>
+                  </div>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${
+                    hasPhraseDefect ? 'bg-[#FFF0F0] text-[#D94848]' : 'bg-[#EAF8F0] text-[#16A36A]'
+                  }`}>
+                    {hasPhraseDefect ? 'FAIL' : 'PASS'}
+                  </span>
+                </div>
+
+                {/* End-of-Speech Integrity */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-[#172033]">
+                    {hasTruncationDefect ? (
+                      <span className="w-4 h-4 rounded-full bg-[#FFF0F0] text-[#D94848] flex items-center justify-center text-[10px] font-bold">✕</span>
+                    ) : (
+                      <span className="w-4 h-4 rounded-full bg-[#EAF8F0] text-[#16A36A] flex items-center justify-center text-[10px] font-bold">✓</span>
+                    )}
+                    <span className="text-xs text-[#172033]">End-of-Speech Integrity</span>
+                  </div>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${
+                    hasTruncationDefect ? 'bg-[#FFF0F0] text-[#D94848]' : 'bg-[#EAF8F0] text-[#16A36A]'
+                  }`}>
+                    {hasTruncationDefect ? 'FAIL' : 'PASS'}
+                  </span>
+                </div>
+
+                {/* Unexpected Silence */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-[#172033]">
+                    {hasSilenceDefect ? (
+                      <span className="w-4 h-4 rounded-full bg-[#FFF7E8] text-[#D99520] flex items-center justify-center text-[10px] font-bold">!</span>
+                    ) : (
+                      <span className="w-4 h-4 rounded-full bg-[#EAF8F0] text-[#16A36A] flex items-center justify-center text-[10px] font-bold">✓</span>
+                    )}
+                    <span className="text-xs text-[#172033]">Unexpected Silence</span>
+                  </div>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${
+                    hasSilenceDefect ? 'bg-[#FFF7E8] text-[#D99520]' : 'bg-[#EAF8F0] text-[#16A36A]'
+                  }`}>
+                    {hasSilenceDefect ? 'WARNING' : 'PASS'}
+                  </span>
+                </div>
+
+                {/* Acoustic Clipping */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-[#172033]">
+                    {hasClippingDefect ? (
+                      <span className="w-4 h-4 rounded-full bg-[#FFF0F0] text-[#D94848] flex items-center justify-center text-[10px] font-bold">✕</span>
+                    ) : (
+                      <span className="w-4 h-4 rounded-full bg-[#EAF8F0] text-[#16A36A] flex items-center justify-center text-[10px] font-bold">✓</span>
+                    )}
+                    <span className="text-xs text-[#172033]">Acoustic Clipping</span>
+                  </div>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${
+                    hasClippingDefect ? 'bg-[#FFF0F0] text-[#D94848]' : 'bg-[#EAF8F0] text-[#16A36A]'
+                  }`}>
+                    {hasClippingDefect ? 'FAIL' : 'PASS'}
+                  </span>
+                </div>
+              </div>
             </div>
 
             {/* Voice Defect Capsule Quick Action Card (Reference Image B) */}
