@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from .config import settings
 from .db import engine, Base, ensure_schema
-from .routers import cases, runs, findings, reviews, capsules, exports, health, auth, audit
+from .routers import cases, runs, findings, reviews, capsules, exports, health, auth, audit, access_requests
 
 # Validate configuration at module load / startup (fails closed on security misconfigurations)
 settings.validate_configuration()
@@ -79,33 +79,72 @@ app.include_router(reviews.router, prefix=settings.API_PREFIX)
 app.include_router(capsules.router, prefix=settings.API_PREFIX)
 app.include_router(exports.router, prefix=settings.API_PREFIX)
 app.include_router(health.router, prefix=settings.API_PREFIX)
+app.include_router(access_requests.router, prefix=settings.API_PREFIX)
 # Also root /health
 app.include_router(health.router)
 
-# Mount Frontend static distribution if built
+# Mount distribution paths
+LANDING_DIST = settings.BASE_DIR / "landing" / "dist"
 FRONTEND_DIST = settings.BASE_DIR / "frontend" / "dist"
-if FRONTEND_DIST.exists():
+
+# Mount Workbench assets at /app/assets
+if (FRONTEND_DIST / "assets").exists():
+    app.mount("/app/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="workbench-assets")
+
+# Mount Landing assets at /assets, /brand, /images
+if LANDING_DIST.exists():
+    if (LANDING_DIST / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=str(LANDING_DIST / "assets")), name="landing-assets")
+    if (LANDING_DIST / "brand").exists():
+        app.mount("/brand", StaticFiles(directory=str(LANDING_DIST / "brand")), name="landing-brand")
+    if (LANDING_DIST / "images").exists():
+        app.mount("/images", StaticFiles(directory=str(LANDING_DIST / "images")), name="landing-images")
+elif (FRONTEND_DIST / "assets").exists():
     app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
 
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        if full_path.startswith("api/"):
-            return JSONResponse(status_code=404, content={"error": {"code": 404, "message": "Not Found"}})
-        index_file = FRONTEND_DIST / "index.html"
-        if index_file.exists():
-            return FileResponse(str(index_file))
-        return JSONResponse(status_code=404, content={"error": {"code": 404, "message": "Frontend not built"}})
-else:
-    @app.get("/")
-    def root():
-        return {
-            "project": settings.PROJECT_NAME,
-            "tagline": settings.TAGLINE,
-            "version": settings.VERSION,
-            "status": "online",
-            "models": {
-                "tts": settings.TIMBRE_MODEL,
-                "asr": settings.PRISMA_MODEL
-            },
-            "mock_mode": settings.MOCK_MODE or not bool(settings.GNANI_API_KEY)
-        }
+
+# Serve Workbench at /app and /app/*
+@app.get("/app")
+@app.get("/app/{full_path:path}")
+async def serve_workbench(full_path: str = ""):
+    workbench_index = FRONTEND_DIST / "index.html"
+    if workbench_index.exists():
+        return FileResponse(str(workbench_index))
+    return JSONResponse(status_code=404, content={"error": {"code": 404, "message": "Workbench frontend not built"}})
+
+
+# Serve Root / Landing Page & marketing assets
+@app.get("/{full_path:path}")
+async def serve_root_or_landing(full_path: str = ""):
+    if full_path.startswith("api/"):
+        return JSONResponse(status_code=404, content={"error": {"code": 404, "message": "Not Found"}})
+
+    # Static assets directly under root
+    if full_path in ("robots.txt", "sitemap.xml") and (LANDING_DIST / full_path).exists():
+        return FileResponse(str(LANDING_DIST / full_path))
+    if full_path == "vite.svg" and (FRONTEND_DIST / "vite.svg").exists():
+        return FileResponse(str(FRONTEND_DIST / "vite.svg"))
+    if full_path in ("favicon.ico", "favicon.svg") and (LANDING_DIST / "brand" / "favicon.svg").exists():
+        return FileResponse(str(LANDING_DIST / "brand" / "favicon.svg"), media_type="image/svg+xml")
+
+    # Serve landing page SPA
+    landing_index = LANDING_DIST / "index.html"
+    if landing_index.exists():
+        return FileResponse(str(landing_index))
+
+    # Fallback to workbench SPA if landing page not yet built
+    workbench_index = FRONTEND_DIST / "index.html"
+    if workbench_index.exists():
+        return FileResponse(str(workbench_index))
+
+    return {
+        "project": settings.PROJECT_NAME,
+        "tagline": settings.TAGLINE,
+        "version": settings.VERSION,
+        "status": "online",
+        "models": {
+            "tts": settings.TIMBRE_MODEL,
+            "asr": settings.PRISMA_MODEL
+        },
+        "mock_mode": settings.MOCK_MODE or not bool(settings.GNANI_API_KEY)
+    }

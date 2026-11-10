@@ -7,7 +7,7 @@ import { CapsuleView } from './pages/CapsuleView';
 import { CommandPalette } from './components/CommandPalette';
 import {
   Activity, Search, Download, AlertTriangle, Layers,
-  BarChart3, User, Sparkles
+  BarChart3, User, Sparkles, Home
 } from 'lucide-react';
 
 export function App() {
@@ -119,6 +119,15 @@ export function App() {
 
             {/* Nav Tabs */}
             <nav className="flex items-center gap-1 text-xs font-medium">
+              <a
+                href="/"
+                title="Go to SvaraLens Landing Page"
+                className="px-2.5 py-1.5 rounded-lg text-[#64748B] hover:text-[#172033] hover:bg-[#F8FAFC] transition-colors flex items-center gap-1.5"
+              >
+                <Home className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Landing</span>
+              </a>
+
               <button
                 onClick={() => setCurrentView('workbench')}
                 className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${

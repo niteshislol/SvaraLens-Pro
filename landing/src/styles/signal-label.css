@@ -1,0 +1,50 @@
+/* Annotation anchored to the defect inside the 3D scene (drei <Html>). Illustrative only. */
+.signal-label {
+  position: relative;
+  transform: translate(-6px, -100%);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  user-select: none;
+}
+.signal-label__text {
+  display: block;
+  padding: 0 0 6px 0;
+  border-bottom: 1px solid #15171b;
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  color: #15171b;
+}
+.signal-label__text i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 9px;
+  background: #e36b55;
+}
+.signal-label__text b {
+  display: block;
+  margin-top: 8px;
+  font-weight: 500;
+  font-size: 15px;
+  letter-spacing: 0.2em;
+}
+.signal-label__leader {
+  position: absolute;
+  left: 6px;
+  top: 100%;
+  width: 1px;
+  height: 46px;
+  background: #15171b;
+  transform-origin: top;
+}
+@media (max-width: 700px) {
+  .signal-label__text {
+    font-size: 9px;
+  }
+  .signal-label__text b {
+    font-size: 12px;
+  }
+  .signal-label__leader {
+    height: 28px;
+  }
+}

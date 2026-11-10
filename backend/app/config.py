@@ -35,6 +35,7 @@ class Settings:
     MOCK_MODE: bool = os.getenv("MOCK_MODE", "true").lower() in ("true", "1", "yes")
 
     # Storage paths
+    DATA_DIR: Path = BASE_DIR / "data"
     DATABASE_URL: str = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR}/data/svaralens.db")
     AUDIO_STORE_PATH: Path = BASE_DIR / "storage" / "audio"
     FIXTURES_PATH: Path = BASE_DIR / "fixtures"

@@ -1,3 +1,10 @@
+FROM node:20-alpine AS landing-builder
+WORKDIR /build-landing
+COPY landing/package*.json ./
+RUN npm install
+COPY landing/ ./
+RUN npm run build
+
 FROM node:20-alpine AS frontend-builder
 WORKDIR /build
 COPY frontend/package*.json ./
@@ -19,6 +26,7 @@ COPY backend/ ./backend/
 COPY scripts/ ./scripts/
 COPY fixtures/ ./fixtures/
 COPY --from=frontend-builder /build/dist ./frontend/dist
+COPY --from=landing-builder /build-landing/dist ./landing/dist
 
 ENV PYTHONPATH=/app/backend
 EXPOSE 8000
