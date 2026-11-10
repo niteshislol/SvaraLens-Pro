@@ -45,10 +45,7 @@ landing/dist/
 .env.*
 !.env.example
 
-# Storage / User Audio (except tracked test fixtures)
-storage/audio/*
-!storage/audio/.gitkeep
-data/svaralens.db
+# Storage / Temporary Files
 data/*.jsonl
 *.sqlite3
 

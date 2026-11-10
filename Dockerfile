@@ -25,11 +25,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./backend/
 COPY scripts/ ./scripts/
 COPY fixtures/ ./fixtures/
+COPY data/ ./data/
+COPY storage/ ./storage/
 COPY --from=frontend-builder /build/dist ./frontend/dist
 COPY --from=landing-builder /build-landing/dist ./landing/dist
 
-# Create storage directories
-RUN mkdir -p /app/data /app/storage/audio
+# Ensure permissions for data and audio directories
+RUN mkdir -p /app/data /app/storage/audio && chmod -R 777 /app/data /app/storage
 
 ENV PYTHONPATH=/app/backend
 ENV PORT=8000

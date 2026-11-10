@@ -194,11 +194,11 @@ def ensure_schema(bind_engine):
                             INSERT OR IGNORE INTO test_cases (
                                 id, org_id, suite_id, scenario, title, dialect, language,
                                 reference_text, critical_phrases_json, voice, tts_model, speed,
-                                channel, sample_rate, severity, is_synthetic, created_at
+                                channel, sample_rate, pace_min, pace_max, severity, is_synthetic, created_at, updated_at
                             ) VALUES (
                                 :id, 'org-default', :suite_id, :scenario, :title, :dialect, :language,
                                 :reference_text, :critical_phrases_json, :voice, :tts_model, :speed,
-                                :channel, :sample_rate, :severity, :is_synthetic, '2026-11-10T00:00:00Z'
+                                :channel, :sample_rate, :pace_min, :pace_max, :severity, :is_synthetic, '2026-11-10T00:00:00Z', '2026-11-10T00:00:00Z'
                             )
                         """), {
                             "id": c["id"],
@@ -214,6 +214,8 @@ def ensure_schema(bind_engine):
                             "speed": c.get("speed", 1.0),
                             "channel": c.get("channel", "standard"),
                             "sample_rate": c.get("sample_rate", 16000),
+                            "pace_min": c.get("pace_min", 1.8),
+                            "pace_max": c.get("pace_max", 4.0),
                             "severity": c.get("severity", "MEDIUM"),
                             "is_synthetic": c.get("is_synthetic", 1)
                         })
