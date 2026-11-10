@@ -158,7 +158,10 @@ export async function triggerGenerateRun(
   const qs = params.toString() ? `?${params.toString()}` : '';
   const url = `${API_BASE}/cases/${caseId}/runs/generate${qs}`;
   const res = await authFetch(url, { method: 'POST' });
-  if (!res.ok) throw new Error('Failed to generate Timbre run');
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to generate Timbre run (HTTP ${res.status})`);
+  }
   return res.json();
 }
 

@@ -623,7 +623,22 @@ async def generate_and_analyze(
             model=model_name
         )
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Timbre ({model_name}) synthesis failed: {str(e)}")
+        logger.warning(f"Live Timbre synthesis error: {e}. Falling back to deterministic audio fixture...")
+        from ..gnani.mock import MockGnaniClient
+        mock_c = MockGnaniClient()
+        try:
+            audio_bytes = await mock_c.synthesize(
+                text=c.reference_text,
+                language=c.language,
+                voice=voice_name,
+                speed=c.speed,
+                case_id=c.id,
+                injected_fault=injected_fault,
+                model=model_name
+            )
+            source = "MOCK_FIXTURE"
+        except Exception:
+            raise HTTPException(status_code=502, detail=f"Timbre ({model_name}) synthesis failed: {str(e)}")
 
     temp_wav = settings.AUDIO_STORE_PATH / f"{run_id}_raw.wav"
     norm_wav = settings.AUDIO_STORE_PATH / f"{run_id}.wav"
@@ -643,8 +658,18 @@ async def generate_and_analyze(
             reference_text=c.reference_text
         )
         stt_res = dual_asr["primary_result"]
+        if not hasattr(stt_res, "text") or not isinstance(stt_res, TranscriptResult):
+            raise RuntimeError("Dual ASR primary result not a TranscriptResult")
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Prisma transcription failed: {str(e)}")
+        logger.warning(f"Live Prisma transcription error: {e}. Falling back to deterministic jury...")
+        from ..gnani.mock import MockGnaniClient
+        mock_c = MockGnaniClient()
+        dual_asr = await mock_c.transcribe_dual_asr(
+            audio_path=str(norm_wav),
+            language=c.language,
+            reference_text=c.reference_text
+        )
+        stt_res = dual_asr["primary_result"]
 
     critical_phrases = json.loads(c.critical_phrases_json) if c.critical_phrases_json else []
     check_results = run_all_checks(

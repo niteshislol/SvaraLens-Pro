@@ -34,6 +34,7 @@ COPY --from=landing-builder /build-landing/dist ./landing/dist
 RUN mkdir -p /app/data /app/storage/audio && chmod -R 777 /app/data /app/storage
 
 ENV PYTHONPATH=/app/backend
+ENV GNANI_API_BASE=https://api.vachana.ai
 ENV PORT=8000
 EXPOSE 8000
 

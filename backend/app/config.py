@@ -27,7 +27,7 @@ class Settings:
 
     # Gnani API settings [CONFIRM]
     GNANI_API_KEY: str = os.getenv("GNANI_API_KEY", "")
-    GNANI_API_BASE: str = os.getenv("GNANI_API_BASE", "https://api.gnani.ai")
+    GNANI_API_BASE: str = os.getenv("GNANI_API_BASE", "https://api.vachana.ai")
     TIMBRE_MODEL: str = os.getenv("TIMBRE_MODEL", "timbre-v2.5")
     PRISMA_MODEL: str = os.getenv("PRISMA_MODEL", "prisma-v2.5")
     

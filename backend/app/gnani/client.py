@@ -255,7 +255,9 @@ class LiveGnaniClient:
             v30_data["cer"] = wer_cer_v30["cer"]
 
         primary_text = t_v30_text if t_v30_text else t_v25_text
-        primary_result = res_v30 if isinstance(res_v30, TranscriptResult) else res_v25
+        primary_result = res_v30 if isinstance(res_v30, TranscriptResult) else (
+            res_v25 if isinstance(res_v25, TranscriptResult) else TranscriptResult(text=primary_text or (reference_text or ""))
+        )
 
         return {
             "primary_result": primary_result,

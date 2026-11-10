@@ -9,6 +9,8 @@ services:
     envVars:
       - key: GNANI_API_KEY
         sync: false
+      - key: GNANI_API_BASE
+        value: "https://api.vachana.ai"
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: MOCK_MODE
