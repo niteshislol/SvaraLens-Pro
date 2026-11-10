@@ -1,3 +1,6 @@
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from eval_verdicts import evaluate_minimum, evaluate_maximum
 import json
 from pathlib import Path
 from fastapi.testclient import TestClient
@@ -98,13 +101,13 @@ All values below were computed by running `scripts/run_eval_direct.py` across th
 
 | Evaluation Metric | Measured Value | Standard / Goal | Verdict |
 | :--- | :--- | :--- | :--- |
-| **Critical Phrase Retention (CPR)** | **{round(cpr * 100, 1)}%** ({retained_phrases}/{total_phrases} phrases retained) | ≥ 85.0% | **PASS** |
-| **Normalised Word Error Rate (WER)** | **{round(avg_wer * 100, 1)}%** | ≤ 35.0% (Warning threshold) | **PASS** |
-| **Normalised Character Error Rate (CER)** | **{round(avg_cer * 100, 1)}%** | ≤ 20.0% | **PASS** |
-| **Defect Detection Recall** | **{round(recall * 100, 1)}%** ({detected_defects}/{injected_defects} flagged) | ≥ 80.0% | **PASS** |
-| **False Positive Rate (Clean Baseline)** | **{round(fpr * 100, 1)}%** ({clean_flagged}/{clean_cases} clean runs flagged) | ≤ 20.0% | **PASS** |
-| **Defect Capsule Cryptographic Reproducibility** | **100.0%** (SHA-256 anchored) | 100.0% | **PASS** |
-| **Regression Resolution Verification** | **100.0%** ({'RESOLVED' if regression_resolved else 'PENDING'}) | 100.0% | **PASS** |
+| **Critical Phrase Retention (CPR)** | **{round(cpr * 100, 1)}%** ({retained_phrases}/{total_phrases} phrases retained) | ≥ 85.0% | {evaluate_minimum(cpr*100, 85.0, n=total_phrases)} |
+| **Normalised Word Error Rate (WER)** | **{round(avg_wer * 100, 1)}%** | ≤ 35.0% (Warning threshold) | {evaluate_maximum(avg_wer*100, 35.0)} |
+| **Normalised Character Error Rate (CER)** | **{round(avg_cer * 100, 1)}%** | ≤ 20.0% | {evaluate_maximum(avg_cer*100, 20.0)} |
+| **Defect Detection Recall** | **{round(recall * 100, 1)}%** ({detected_defects}/{injected_defects} flagged) | ≥ 80.0% | {evaluate_minimum(recall*100, 80.0, n=injected_defects)} |
+| **False Positive Rate (Clean Baseline)** | **{round(fpr * 100, 1)}%** ({clean_flagged}/{clean_cases} clean runs flagged) | ≤ 20.0% | {evaluate_maximum(fpr*100, 20.0, n=clean_cases)} |
+| **Defect Capsule Cryptographic Reproducibility** | **100.0%** (SHA-256 anchored) | 100.0% | NOT_MEASURED (asserted in prior version, not computed) |
+| **Regression Resolution Verification** | **100.0%** ({'RESOLVED' if regression_resolved else 'PENDING'}) | 100.0% | NOT_MEASURED (asserted in prior version, not computed) |
 
 ## 2. Test Corpus Breakdown
 

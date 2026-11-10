@@ -83,6 +83,7 @@ class TestCaseUpdate(BaseModel):
 
 class TestCaseRead(TestCaseBase):
     id: str
+    org_id: Optional[str] = None
     suite_id: str
     created_at: str
     updated_at: str
@@ -177,8 +178,8 @@ class RunRead(BaseModel):
     duration_s: Optional[float] = None
     sample_rate: Optional[int] = None
     channels: Optional[int] = None
-    tts_model: Optional[str] = "timbre-v3.0"
-    tts_voice: Optional[str] = "Shivani"
+    tts_model: Optional[str] = None
+    tts_voice: Optional[str] = None
     transcript_text: Optional[str] = None
     transcript_words: Optional[List[Dict[str, Any]]] = None
     stt_dual_results: Optional[Dict[str, Any]] = None
@@ -303,3 +304,57 @@ class CapsuleIntegrityResponse(BaseModel):
     computed_sha256: str
     audio_path: Optional[str] = None
     verified_at: str
+
+# --- Security, Identity & Authentication (Phase 1C) ---
+
+class UserLoginRequest(BaseModel):
+    username: str
+    password: str
+
+class UserRegisterRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+    role: str  # 'ADMIN', 'QA_LEAD', 'QA_REVIEWER', 'AUDITOR'
+    full_name: Optional[str] = None
+
+class UserResponse(BaseModel):
+    id: str
+    org_id: str
+    username: str
+    email: str
+    role: str
+    full_name: Optional[str] = None
+    is_active: bool
+    created_at: str
+    last_login_at: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in_minutes: int
+    user: UserResponse
+
+class AdminResetPasswordRequest(BaseModel):
+    user_id: str
+    new_password: str
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+class AuditEventDetail(BaseModel):
+    id: str
+    org_id: str
+    actor_id: str
+    actor_username: str
+    actor_role: str
+    action: str
+    resource_type: str
+    resource_id: str
+    timestamp: str
+    details: Dict[str, Any]
+    ip_address: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+

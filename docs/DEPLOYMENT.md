@@ -28,7 +28,7 @@ SVARALENS_PORT=8000
 DATABASE_URL=sqlite:///./data/svaralens.db
 
 # Gnani.ai / Vachana API Credentials
-GNANI_API_KEY=vach_your_api_key_here
+GNANI_API_KEY=<set-in-server-environment>
 GNANI_BASE_URL=https://api.vachana.ai
 
 # Execution Mode: set to false to use live Gnani synthesis and transcription

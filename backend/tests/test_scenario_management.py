@@ -3,8 +3,10 @@ import io
 import json
 from fastapi.testclient import TestClient
 from app.main import app
+from app.auth.security import create_access_token
 
 client = TestClient(app)
+client.headers["Authorization"] = f"Bearer {create_access_token({'sub': 'admin', 'role': 'ADMIN', 'org_id': 'org-default'})}"
 
 def test_scenario_search_and_filters():
     # 1. Search by scenario text

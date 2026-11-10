@@ -6,28 +6,32 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request
 from sqlalchemy.orm import Session
 from ..db import get_db
-from ..models import TestCase, Suite, Run, Finding
+from ..models import TestCase, Suite, Run, Finding, User
 from ..schemas import (
     TestCaseCreate, TestCaseRead, TestCaseUpdate, RunRead, FindingRead
 )
 from ..config import settings
-from ..gnani.mock import get_gnani_client
+from ..gnani import get_gnani_client
 from ..audio.normalize import normalize_to_standard_wav
 from ..audio.analyze import analyze_audio_file
 from ..checks.runner import run_all_checks
 from ..capsule.compiler import compute_sha256
+from ..auth.dependencies import get_current_user, require_not_auditor
+from ..audit import record_audit_event
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 
-def get_next_case_id(db: Session) -> str:
-    existing_ids = {c[0] for c in db.query(TestCase.id).all()}
+
+def get_next_case_id(db: Session, org_id: str) -> str:
+    existing_ids = {c[0] for c in db.query(TestCase.id).filter(TestCase.org_id == org_id).all()}
     i = 1
     while f"TC-{i:03d}" in existing_ids:
         i += 1
     return f"TC-{i:03d}"
+
 
 @router.get("", response_model=List[TestCaseRead])
 def list_test_cases(
@@ -35,9 +39,11 @@ def list_test_cases(
     search: Optional[str] = None,
     language: Optional[str] = None,
     severity: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    query = db.query(TestCase)
+    """Lists test scenarios strictly scoped to caller's organisation."""
+    query = db.query(TestCase).filter(TestCase.org_id == current_user.org_id)
     if suite_id:
         query = query.filter(TestCase.suite_id == suite_id)
     if language and language != "ALL":
@@ -52,13 +58,14 @@ def list_test_cases(
             (TestCase.reference_text.ilike(search_filter))
         )
     cases = query.order_by(TestCase.created_at.desc(), TestCase.id.desc()).all()
-    
+
     results = []
     for c in cases:
         critical_phrases = json.loads(c.critical_phrases_json) if c.critical_phrases_json else []
         critical_entities = json.loads(c.critical_entities_json) if getattr(c, "critical_entities_json", None) else None
         results.append(TestCaseRead(
             id=c.id,
+            org_id=c.org_id,
             suite_id=c.suite_id,
             scenario=c.scenario,
             title=getattr(c, "title", None) or c.scenario,
@@ -82,16 +89,16 @@ def list_test_cases(
         ))
     return results
 
+
 @router.get("/export")
 def export_test_cases(
     suite_id: Optional[str] = Query(None),
     format: str = Query("json", pattern="^(json|csv)$"),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    Exports test scenarios as JSON or CSV per Section 5 of Master Build Document.
-    """
-    query = db.query(TestCase)
+    """Exports test scenarios strictly from the caller's organisation."""
+    query = db.query(TestCase).filter(TestCase.org_id == current_user.org_id)
     if suite_id:
         query = query.filter(TestCase.suite_id == suite_id)
     cases = query.order_by(TestCase.created_at.desc(), TestCase.id.desc()).all()
@@ -127,20 +134,27 @@ def export_test_cases(
             headers={"Content-Disposition": "attachment; filename=test_cases.csv"}
         )
 
+
 @router.post("", response_model=TestCaseRead, status_code=201)
-def create_test_case(case_in: TestCaseCreate, db: Session = Depends(get_db)):
-    case_id = case_in.id or get_next_case_id(db)
-    
-    # Check suite exists or create default
-    suite = db.query(Suite).filter(Suite.id == case_in.suite_id).first()
+def create_test_case(
+    case_in: TestCaseCreate,
+    request: Request,
+    current_user: User = Depends(require_not_auditor),
+    db: Session = Depends(get_db)
+):
+    """Creates a new test scenario. Scoped to authenticated user's organisation.
+    Auditors are blocked from creating cases."""
+    case_id = case_in.id or get_next_case_id(db, current_user.org_id)
+
+    suite = db.query(Suite).filter(Suite.id == case_in.suite_id, Suite.org_id == current_user.org_id).first()
     if not suite:
-        suite = Suite(id=case_in.suite_id, name="Default Test Suite")
+        suite = Suite(id=case_in.suite_id, org_id=current_user.org_id, name="Default Test Suite")
         db.add(suite)
-        db.commit()
+        db.flush()
 
     crit_json = json.dumps([cp.model_dump() for cp in case_in.critical_phrases], ensure_ascii=False)
 
-    existing = db.query(TestCase).filter(TestCase.id == case_id).first()
+    existing = db.query(TestCase).filter(TestCase.id == case_id, TestCase.org_id == current_user.org_id).first()
     if existing:
         existing.scenario = case_in.scenario
         existing.language = case_in.language
@@ -151,12 +165,12 @@ def create_test_case(case_in: TestCaseCreate, db: Session = Depends(get_db)):
         existing.voice = case_in.voice or "Shivani"
         if hasattr(existing, "tts_model"):
             existing.tts_model = case_in.tts_model or "timbre-v3.0"
-        db.commit()
-        db.refresh(existing)
         db_case = existing
+        action = "TEST_CASE_UPDATED"
     else:
         db_case = TestCase(
             id=case_id,
+            org_id=current_user.org_id,
             suite_id=case_in.suite_id,
             scenario=case_in.scenario,
             language=case_in.language,
@@ -172,12 +186,25 @@ def create_test_case(case_in: TestCaseCreate, db: Session = Depends(get_db)):
             is_synthetic=case_in.is_synthetic
         )
         db.add(db_case)
-        db.commit()
-        db.refresh(db_case)
+        action = "TEST_CASE_CREATED"
+
+    db.flush()
+    record_audit_event(
+        db=db,
+        actor=current_user,
+        action=action,
+        resource_type="TestCase",
+        resource_id=db_case.id,
+        details={"scenario": db_case.scenario, "severity": db_case.severity},
+        request=request
+    )
+    db.commit()
+    db.refresh(db_case)
 
     critical_phrases = json.loads(db_case.critical_phrases_json) if db_case.critical_phrases_json else []
     return TestCaseRead(
         id=db_case.id,
+        org_id=db_case.org_id,
         suite_id=db_case.suite_id,
         scenario=db_case.scenario,
         language=db_case.language,
@@ -195,15 +222,22 @@ def create_test_case(case_in: TestCaseCreate, db: Session = Depends(get_db)):
         updated_at=db_case.updated_at
     )
 
+
 @router.get("/{id}", response_model=TestCaseRead)
-def get_test_case(id: str, db: Session = Depends(get_db)):
-    c = db.query(TestCase).filter(TestCase.id == id).first()
+def get_test_case(
+    id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Retrieves a scenario. Returns 404 on cross-organisation access."""
+    c = db.query(TestCase).filter(TestCase.id == id, TestCase.org_id == current_user.org_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Test case not found")
     critical_phrases = json.loads(c.critical_phrases_json) if c.critical_phrases_json else []
     critical_entities = json.loads(c.critical_entities_json) if getattr(c, "critical_entities_json", None) else None
     return TestCaseRead(
         id=c.id,
+        org_id=c.org_id,
         suite_id=c.suite_id,
         scenario=c.scenario,
         title=getattr(c, "title", None) or c.scenario,
@@ -226,12 +260,21 @@ def get_test_case(id: str, db: Session = Depends(get_db)):
         updated_at=c.updated_at
     )
 
+
 @router.patch("/{id}", response_model=TestCaseRead)
-def update_test_case(id: str, case_in: TestCaseUpdate, db: Session = Depends(get_db)):
-    c = db.query(TestCase).filter(TestCase.id == id).first()
+def update_test_case(
+    id: str,
+    case_in: TestCaseUpdate,
+    request: Request,
+    current_user: User = Depends(require_not_auditor),
+    db: Session = Depends(get_db)
+):
+    """Updates a scenario. Auditors are blocked (403)."""
+    c = db.query(TestCase).filter(TestCase.id == id, TestCase.org_id == current_user.org_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Test case not found")
-    
+
+    old_sev = c.severity
     if case_in.scenario is not None:
         c.scenario = case_in.scenario
     if case_in.title is not None:
@@ -266,6 +309,18 @@ def update_test_case(id: str, case_in: TestCaseUpdate, db: Session = Depends(get
         c.severity = case_in.severity
 
     c.updated_at = datetime.now(timezone.utc).isoformat()
+    db.flush()
+
+    action = "SEVERITY_CHANGED" if (case_in.severity and case_in.severity != old_sev) else "TEST_CASE_UPDATED"
+    record_audit_event(
+        db=db,
+        actor=current_user,
+        action=action,
+        resource_type="TestCase",
+        resource_id=c.id,
+        details={"old_severity": old_sev, "new_severity": c.severity},
+        request=request
+    )
     db.commit()
     db.refresh(c)
 
@@ -273,6 +328,7 @@ def update_test_case(id: str, case_in: TestCaseUpdate, db: Session = Depends(get
     critical_entities = json.loads(c.critical_entities_json) if getattr(c, "critical_entities_json", None) else None
     return TestCaseRead(
         id=c.id,
+        org_id=c.org_id,
         suite_id=c.suite_id,
         scenario=c.scenario,
         title=getattr(c, "title", None) or c.scenario,
@@ -295,15 +351,23 @@ def update_test_case(id: str, case_in: TestCaseUpdate, db: Session = Depends(get
         updated_at=c.updated_at
     )
 
+
 @router.post("/{id}/duplicate", response_model=TestCaseRead, status_code=201)
-def duplicate_test_case(id: str, db: Session = Depends(get_db)):
-    c = db.query(TestCase).filter(TestCase.id == id).first()
+def duplicate_test_case(
+    id: str,
+    request: Request,
+    current_user: User = Depends(require_not_auditor),
+    db: Session = Depends(get_db)
+):
+    """Duplicates a test scenario within the caller's organisation."""
+    c = db.query(TestCase).filter(TestCase.id == id, TestCase.org_id == current_user.org_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Test case not found")
-    
-    new_id = get_next_case_id(db)
+
+    new_id = get_next_case_id(db, current_user.org_id)
     new_case = TestCase(
         id=new_id,
+        org_id=current_user.org_id,
         suite_id=c.suite_id,
         scenario=f"Copy of {c.scenario}",
         title=f"Copy of {getattr(c, 'title', None) or c.scenario}",
@@ -324,6 +388,17 @@ def duplicate_test_case(id: str, db: Session = Depends(get_db)):
         is_synthetic=c.is_synthetic
     )
     db.add(new_case)
+    db.flush()
+
+    record_audit_event(
+        db=db,
+        actor=current_user,
+        action="TEST_CASE_DUPLICATED",
+        resource_type="TestCase",
+        resource_id=new_case.id,
+        details={"source_case_id": c.id},
+        request=request
+    )
     db.commit()
     db.refresh(new_case)
 
@@ -331,6 +406,7 @@ def duplicate_test_case(id: str, db: Session = Depends(get_db)):
     critical_entities = json.loads(new_case.critical_entities_json) if new_case.critical_entities_json else None
     return TestCaseRead(
         id=new_case.id,
+        org_id=new_case.org_id,
         suite_id=new_case.suite_id,
         scenario=new_case.scenario,
         title=new_case.title,
@@ -353,13 +429,21 @@ def duplicate_test_case(id: str, db: Session = Depends(get_db)):
         updated_at=new_case.updated_at
     )
 
+
 @router.delete("/{id}")
-def delete_test_case(id: str, force: bool = Query(False), db: Session = Depends(get_db)):
-    c = db.query(TestCase).filter(TestCase.id == id).first()
+def delete_test_case(
+    id: str,
+    force: bool = Query(False),
+    request: Request = None,
+    current_user: User = Depends(require_not_auditor),
+    db: Session = Depends(get_db)
+):
+    """Deletes a test scenario. Scoped to organisation.
+    Blocks deletion if active capsules exist unless ?force=true."""
+    c = db.query(TestCase).filter(TestCase.id == id, TestCase.org_id == current_user.org_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Test case not found")
-    
-    # Safeguard against deleting scenarios with active defect capsules
+
     active_capsules = [cap.id for cap in c.capsules if cap.state in ("OPEN", "REOPENED")]
     if active_capsules and not force:
         raise HTTPException(
@@ -367,7 +451,6 @@ def delete_test_case(id: str, force: bool = Query(False), db: Session = Depends(
             detail=f"Cannot delete scenario '{id}' because it has {len(active_capsules)} active Voice Defect Capsule(s) ({', '.join(active_capsules)}). Resolve or archive capsules first, or pass ?force=true."
         )
 
-    # Delete associated audio files
     for r in c.runs:
         if r.audio_path and Path(r.audio_path).exists():
             try:
@@ -375,26 +458,35 @@ def delete_test_case(id: str, force: bool = Query(False), db: Session = Depends(
             except Exception:
                 pass
 
+    record_audit_event(
+        db=db,
+        actor=current_user,
+        action="TEST_CASE_DELETED",
+        resource_type="TestCase",
+        resource_id=c.id,
+        details={"scenario": c.scenario, "forced": force},
+        request=request
+    )
     db.delete(c)
     db.commit()
     return {"status": "deleted", "id": id}
+
 
 @router.post("/import-csv")
 async def import_cases_csv(
     file: UploadFile = File(...),
     suite_id: str = Form("suite-insurance-hi"),
+    request: Request = None,
+    current_user: User = Depends(require_not_auditor),
     db: Session = Depends(get_db)
 ):
-    """
-    Import CSV columns: scenario,language,reference_text,critical_phrases,severity
-    Returns a comprehensive summary: total_rows, imported, skipped, failed, failure_reasons.
-    """
+    """Imports scenarios from CSV strictly into the caller's organisation."""
     content = await file.read()
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError:
         text = content.decode("latin-1")
-    
+
     reader = csv.DictReader(io.StringIO(text))
     if not reader.fieldnames or "scenario" not in reader.fieldnames or "reference_text" not in reader.fieldnames:
         return {
@@ -425,8 +517,8 @@ async def import_cases_csv(
                 continue
 
             if lang not in ("hi-IN", "hinglish"):
-                lang = "hi-IN"  # fallback with warning
-            
+                lang = "hi-IN"
+
             if severity not in ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL'):
                 severity = "HIGH"
 
@@ -437,9 +529,10 @@ async def import_cases_csv(
                     if p:
                         crit_phrases.append({"text": p, "variants": [], "severity": severity})
 
-            case_id = get_next_case_id(db)
+            case_id = get_next_case_id(db, current_user.org_id)
             db_case = TestCase(
                 id=case_id,
+                org_id=current_user.org_id,
                 suite_id=suite_id,
                 scenario=scenario,
                 title=scenario,
@@ -462,6 +555,17 @@ async def import_cases_csv(
             db.rollback()
             errors.append(f"Row {idx}: {str(e)}")
 
+    record_audit_event(
+        db=db,
+        actor=current_user,
+        action="CSV_IMPORTED",
+        resource_type="Suite",
+        resource_id=suite_id,
+        details={"total_rows": total_rows, "imported": created, "skipped": skipped, "failed": len(errors)},
+        request=request
+    )
+    db.commit()
+
     return {
         "total_rows": total_rows,
         "imported": created,
@@ -470,29 +574,34 @@ async def import_cases_csv(
         "failure_reasons": errors
     }
 
+
 @router.get("/{id}/runs/latest", response_model=RunRead)
-def get_latest_run_for_case(id: str, db: Session = Depends(get_db)):
-    run = db.query(Run).filter(Run.case_id == id).order_by(Run.created_at.desc()).first()
+def get_latest_run_for_case(
+    id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Fetches the latest run for a scenario within the caller's organisation."""
+    run = db.query(Run).filter(Run.case_id == id, Run.org_id == current_user.org_id).order_by(Run.created_at.desc()).first()
     if not run:
         raise HTTPException(status_code=404, detail=f"No runs found for case {id}")
     from .runs import get_run_detail
-    return get_run_detail(run.id, db)
+    return get_run_detail(run.id, current_user, db)
+
 
 @router.post("/{id}/runs/generate")
 async def generate_and_analyze(
     id: str,
+    request: Request = None,
     tts_model: Optional[str] = Query(None, description="Model: timbre-v3.0 or timbre-v2.5"),
     tts_voice: Optional[str] = Query(None, description="Voice: Shivani, Avinash, Nalini, Deepak, etc."),
-    injected_fault: Optional[str] = Query(None, description="Optional fault to inject: END_TRUNCATION, CLIPPING, SILENCE"),
+    injected_fault: Optional[str] = Query(None, description="Optional fault to inject"),
+    current_user: User = Depends(require_not_auditor),
     db: Session = Depends(get_db)
 ):
-    """
-    Step 1: Calls Gnani Timbre (v3.0 or v2.5) to synthesize speech.
-    Step 2: Saves audio to storage/audio and normalizes to standard 16kHz WAV.
-    Step 3: Calls Dual-ASR Jury (Prisma v2.5 + Prisma v3.0 in parallel) to transcribe audio.
-    Step 4: Executes 6 checks and persists findings, telemetry, and consensus.
-    """
-    c = db.query(TestCase).filter(TestCase.id == id).first()
+    """Synthesizes speech with Gnani Timbre, runs Dual-ASR Jury and audio checks.
+    Scoped strictly to the authenticated user's organisation."""
+    c = db.query(TestCase).filter(TestCase.id == id, TestCase.org_id == current_user.org_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Test case not found")
 
@@ -503,7 +612,6 @@ async def generate_and_analyze(
     model_name = tts_model or getattr(c, "tts_model", None) or "timbre-v3.0"
     voice_name = tts_voice or c.voice or ("Shivani" if model_name == "timbre-v3.0" else "Nalini")
 
-    # 1. Synthesize audio
     try:
         audio_bytes = await gnani_client.synthesize(
             text=c.reference_text,
@@ -517,21 +625,17 @@ async def generate_and_analyze(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Timbre ({model_name}) synthesis failed: {str(e)}")
 
-    # 2. Save raw audio
     temp_wav = settings.AUDIO_STORE_PATH / f"{run_id}_raw.wav"
     norm_wav = settings.AUDIO_STORE_PATH / f"{run_id}.wav"
     with open(temp_wav, "wb") as f:
         f.write(audio_bytes)
 
-    # Normalize audio to 16kHz mono WAV
     sr, channels, duration_s = normalize_to_standard_wav(str(temp_wav), str(norm_wav), target_sr=16000)
     temp_wav.unlink(missing_ok=True)
     audio_sha256 = compute_sha256(str(norm_wav))
 
-    # 3. Acoustic Analysis
     acoustic_data = analyze_audio_file(str(norm_wav))
 
-    # 4. Transcribe with Dual-ASR Jury (Prisma v2.5 + Prisma v3.0)
     try:
         dual_asr = await gnani_client.transcribe_dual_asr(
             audio_path=str(norm_wav),
@@ -542,7 +646,6 @@ async def generate_and_analyze(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Prisma transcription failed: {str(e)}")
 
-    # 5. Execute 6 checks on primary transcript
     critical_phrases = json.loads(c.critical_phrases_json) if c.critical_phrases_json else []
     check_results = run_all_checks(
         reference_text=c.reference_text,
@@ -553,9 +656,9 @@ async def generate_and_analyze(
         pace_max=c.pace_max
     )
 
-    # 6. Persist Run, Dual-ASR Telemetry, and Findings
     db_run = Run(
         id=run_id,
+        org_id=current_user.org_id,
         case_id=c.id,
         source=source,
         status="ANALYSED",
@@ -585,6 +688,7 @@ async def generate_and_analyze(
         finding_id = f"FND-{run_id}-{idx+1:02d}"
         db_finding = Finding(
             id=finding_id,
+            org_id=current_user.org_id,
             run_id=run_id,
             check_type=f.check_type,
             status=f.status,
@@ -596,19 +700,32 @@ async def generate_and_analyze(
         )
         db.add(db_finding)
 
+    db.flush()
+    record_audit_event(
+        db=db,
+        actor=current_user,
+        action="RUN_GENERATED",
+        resource_type="TestCase",
+        resource_id=c.id,
+        details={"run_id": run_id, "model": model_name, "voice": voice_name},
+        request=request
+    )
     db.commit()
     db.refresh(db_run)
     return {"run_id": run_id, "status": "ANALYSED", "findings_count": len(check_results["findings"])}
+
 
 @router.post("/{id}/runs/upload")
 async def upload_and_analyze(
     id: str,
     file: UploadFile = File(...),
     injected_fault: Optional[str] = Form(None),
+    request: Request = None,
+    current_user: User = Depends(require_not_auditor),
     db: Session = Depends(get_db)
 ):
     """Uploads an existing audio recording and runs full analysis."""
-    c = db.query(TestCase).filter(TestCase.id == id).first()
+    c = db.query(TestCase).filter(TestCase.id == id, TestCase.org_id == current_user.org_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Test case not found")
 
@@ -648,6 +765,7 @@ async def upload_and_analyze(
 
     db_run = Run(
         id=run_id,
+        org_id=current_user.org_id,
         case_id=c.id,
         source="UPLOAD",
         status="ANALYSED",
@@ -676,6 +794,7 @@ async def upload_and_analyze(
         finding_id = f"FND-{run_id}-{idx+1:02d}"
         db_finding = Finding(
             id=finding_id,
+            org_id=current_user.org_id,
             run_id=run_id,
             check_type=f.check_type,
             status=f.status,
@@ -687,5 +806,15 @@ async def upload_and_analyze(
         )
         db.add(db_finding)
 
+    db.flush()
+    record_audit_event(
+        db=db,
+        actor=current_user,
+        action="RUN_UPLOADED",
+        resource_type="TestCase",
+        resource_id=c.id,
+        details={"run_id": run_id, "audio_sha256": audio_sha256},
+        request=request
+    )
     db.commit()
     return {"run_id": run_id, "status": "ANALYSED", "findings_count": len(check_results["findings"])}

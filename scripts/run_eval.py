@@ -1,3 +1,6 @@
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from eval_verdicts import evaluate_minimum, evaluate_maximum
 import json
 import requests
 import sys
@@ -83,13 +86,13 @@ Evaluated on: Gnani Timbre v2.5 / Prisma v2.5
 
 | Metric | Measured Value | Standard / Target | Status |
 | :--- | :--- | :--- | :--- |
-| **Critical Phrase Retention (CPR)** | {round(cpr * 100, 1)}% ({retained_phrases}/{total_phrases} phrases) | ≥ 85.0% | PASS |
-| **Normalised WER** | {round(avg_wer * 100, 1)}% | ≤ 35.0% | PASS |
-| **Normalised CER** | {round(avg_cer * 100, 1)}% | ≤ 20.0% | PASS |
-| **Defect Detection Recall** | {round(recall * 100, 1)}% ({flagged_defects_count}/{injected_defects_count} injected) | ≥ 80.0% | PASS |
-| **False Positive Rate (Clean)** | {round(fpr * 100, 1)}% ({clean_samples_flagged}/{clean_samples_count} clean samples) | ≤ 20.0% | PASS |
-| **Capsule Determinism / Reproducibility** | 100.0% (SHA-256 locked) | 100.0% | PASS |
-| **Regression Resolution Verification** | 100.0% (PASS on corrected audio) | 100.0% | PASS |
+| **Critical Phrase Retention (CPR)** | {round(cpr * 100, 1)}% ({retained_phrases}/{total_phrases} phrases) | ≥ 85.0% | {evaluate_minimum(cpr*100, 85.0, n=total_phrases)} |
+| **Normalised WER** | {round(avg_wer * 100, 1)}% | ≤ 35.0% | {evaluate_maximum(avg_wer*100, 35.0)} |
+| **Normalised CER** | {round(avg_cer * 100, 1)}% | ≤ 20.0% | {evaluate_maximum(avg_cer*100, 20.0)} |
+| **Defect Detection Recall** | {round(recall * 100, 1)}% ({flagged_defects_count}/{injected_defects_count} injected) | ≥ 80.0% | {evaluate_minimum(recall*100, 80.0, n=injected_defects_count)} |
+| **False Positive Rate (Clean)** | {round(fpr * 100, 1)}% ({clean_samples_flagged}/{clean_samples_count} clean samples) | ≤ 20.0% | {evaluate_maximum(fpr*100, 20.0, n=clean_samples_count)} |
+| **Capsule Determinism / Reproducibility** | 100.0% (SHA-256 locked) | 100.0% | NOT_MEASURED (asserted in prior version, not computed) |
+| **Regression Resolution Verification** | 100.0% (PASS on corrected audio) | 100.0% | NOT_MEASURED (asserted in prior version, not computed) |
 
 > *All values are directly measured by the evaluation harness scripts/run_eval.py. No placeholder or invented numbers.*
 """

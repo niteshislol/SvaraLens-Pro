@@ -47,6 +47,12 @@ storage/audio/*
 data/svaralens.db
 *.sqlite3
 
+# Backups and Archives (STRICT GUARDRAIL)
+backup/
+*.zip
+*.tar.gz
+*.tar.bz2
+
 # IDE / OS
 .DS_Store
 .idea/

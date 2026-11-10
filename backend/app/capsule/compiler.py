@@ -180,7 +180,12 @@ def compile_defect_capsule(
     evidence = json.loads(finding.evidence_json) if isinstance(finding.evidence_json, str) else finding.evidence_json
     critical_phrases = json.loads(test_case.critical_phrases_json) if isinstance(test_case.critical_phrases_json, str) else test_case.critical_phrases_json
 
-    audio_hash = run.audio_sha256 or (compute_sha256(run.audio_path) if run.audio_path else "sha256:unknown")
+    # Evidence integrity: hash MUST come from the actual stored bytes. No fallback value is accepted.
+    if not run.audio_path or not Path(run.audio_path).is_file():
+        raise ValueError("Cannot compile capsule: original audio artifact is missing on disk.")
+    audio_hash = compute_sha256(run.audio_path)
+    if run.audio_sha256 and run.audio_sha256 != audio_hash:
+        raise ValueError("Cannot compile capsule: stored audio hash does not match file bytes (evidence altered).")
     assertions = build_assertions_for_defect(finding.check_type, evidence, test_case)
 
     # Determine failing region
@@ -198,11 +203,11 @@ def compile_defect_capsule(
         "reference_text": test_case.reference_text,
         "critical_phrases": critical_phrases,
         "gnani_models": {
-            "tts": "timbre-v2.5",
-            "stt": "prisma-v2.5"
+            "tts": getattr(run, "tts_model", None),   # actual model used for this run
+            "stt": None  # TODO(Phase 2): record real ASR model/version from ASRExecution
         },
         "voice_configuration": {
-            "voice": test_case.voice or "ananya",
+            "voice": getattr(run, "tts_voice", None) or test_case.voice,
             "speed": test_case.speed,
             "channel": test_case.channel
         },

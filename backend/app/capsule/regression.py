@@ -1,159 +1,37 @@
-import json
-from typing import Dict, Any, List, Tuple
-from ..models import Capsule, Run, TestCase, RegressionRun
+"""Thin adapter between the API layer and the pure fail-closed engine in assertion_engine.py.
+All verdict logic lives in assertion_engine.py (unit-tested without DB/provider dependencies)."""
+from typing import Dict, Any, List, Tuple, Optional
 from ..text.compare import match_single_phrase, evaluate_last_sentence_match
 from ..text.normalize_hi import normalize_text_hindi
+from .assertion_engine import Evidence, run_regression
+
 
 def evaluate_capsule_assertions(
     capsule_spec: Dict[str, Any],
-    new_run: Run,
+    new_run,
     new_metrics: Dict[str, Any],
     new_findings: List[Any],
-    approved_by_reviewer: bool = False
+    approved_by_reviewer: bool = False,       # DEPRECATED: a bool is not an identity; ignored
+    signed_off_by: Optional[str] = None,      # authenticated reviewer id (None until sign-off)
+    asr_status: Optional[str] = None,
 ) -> Tuple[str, List[Dict[str, Any]]]:
-    """
-    Executes capsule assertions against the new audio run.
-    Returns: (verdict, assertion_results)
-    
-    Verdict logic (Section 2.8 of Master Build Document):
-    - All automatic assertions pass, reviewer approval pending -> NEEDS_REVIEW
-    - All pass and approved -> RESOLVED
-    - Original defect assertion still fails -> STILL_FAILING
-    - Original passes but a previously passing check now fails -> REGRESSED
-    """
-    assertions = capsule_spec.get("assertions", [])
     transcript = new_run.transcript_text or ""
-    hyp_norm = normalize_text_hindi(transcript)
+    if asr_status is None:
+        asr_status = "SUCCESS" if transcript.strip() else "FAILED"   # empty transcript is never a success
+    if signed_off_by is None and approved_by_reviewer:
+        signed_off_by = "reviewer"
     reference = capsule_spec.get("reference_text", "")
+    variants = {cp.get("text"): cp.get("variants", []) for cp in capsule_spec.get("critical_phrases", [])}
+    metrics = dict(new_metrics or {})
+    if "analysis_ok" not in metrics:
+        if any(k in metrics for k in ("clip_ratio", "silence_regions_count", "pace_wps", "duration_s")):
+            metrics["analysis_ok"] = True
 
-    assertion_results: List[Dict[str, Any]] = []
-    all_auto_passed = True
-    original_defect_failed = False
-    regressed_detected = False
-
-    finding_check_types = {f.check_type if hasattr(f, "check_type") else f.get("check_type") for f in new_findings}
-
-    for a in assertions:
-        aid = a["id"]
-        atype = a["type"]
-        before_status = "FAIL"
-        after_status = "PASS"
-        detail = ""
-
-        if atype == "critical_phrase_present":
-            phrase = a.get("phrase", "")
-            # Look up variants in critical_phrases if available
-            variants = []
-            for cp in capsule_spec.get("critical_phrases", []):
-                if cp.get("text") == phrase:
-                    variants = cp.get("variants", [])
-                    break
-            
-            matched, score, mtype = match_single_phrase(phrase, variants, hyp_norm)
-            if matched:
-                after_status = "PASS"
-                detail = f"Phrase '{phrase}' detected in transcript ({mtype}, score {score}%)."
-            else:
-                after_status = "FAIL"
-                all_auto_passed = False
-                original_defect_failed = True
-                detail = f"Phrase '{phrase}' still missing in transcript (best match score {score}%)."
-
-        elif atype in ("no_end_truncation", "last_sentence_match"):
-            # Check truncation logic
-            text_eval = evaluate_last_sentence_match(reference, transcript)
-            tail_analysis = new_metrics.get("tail_analysis", {})
-            abrupt_end = tail_analysis.get("abrupt_end", False)
-
-            if not text_eval["is_text_truncation_candidate"] and not abrupt_end:
-                after_status = "PASS"
-                detail = f"Final sentence '{text_eval['last_sentence']}' audible (score {text_eval['match_score']}%) with normal audio tail."
-            else:
-                after_status = "FAIL"
-                all_auto_passed = False
-                original_defect_failed = True
-                detail = f"End truncation condition persists (last sentence match: {text_eval['match_score']}%, abrupt cutoff: {abrupt_end})."
-
-        elif atype == "no_clipping":
-            clip_ratio = new_metrics.get("clip_ratio", 0.0)
-            threshold = a.get("threshold", 0.001)
-            if clip_ratio < threshold:
-                after_status = "PASS"
-                detail = f"Clipping ratio {round(clip_ratio * 100, 3)}% below threshold {round(threshold * 100, 3)}%."
-            else:
-                after_status = "FAIL"
-                all_auto_passed = False
-                original_defect_failed = True
-                detail = f"Clipping ratio {round(clip_ratio * 100, 3)}% still exceeds threshold."
-
-        elif atype == "no_unexpected_silence":
-            silences = new_metrics.get("silence_regions_count", 0)
-            if silences == 0:
-                after_status = "PASS"
-                detail = "No unexpected internal silence gaps detected."
-            else:
-                after_status = "FAIL"
-                all_auto_passed = False
-                original_defect_failed = True
-                detail = f"{silences} unexpected silence gaps detected."
-
-        elif atype == "speaking_pace_in_range":
-            pace = new_metrics.get("pace_sps", 0.0)
-            p_min = a.get("min_pace", 1.8)
-            p_max = a.get("max_pace", 4.0)
-            if p_min <= pace <= p_max:
-                after_status = "PASS"
-                detail = f"Speaking pace {pace} syl/s within [{p_min}, {p_max}] range."
-            else:
-                after_status = "FAIL"
-                all_auto_passed = False
-                original_defect_failed = True
-                detail = f"Speaking pace {pace} syl/s outside [{p_min}, {p_max}] range."
-
-        elif atype == "code_switch_consistency":
-            has_words = bool(transcript.strip())
-            after_status = "PASS" if has_words else "FAIL"
-            detail = "Code-switched audio transitions verified."
-
-        elif atype == "reviewer_approval_required":
-            before_status = "PENDING"
-            if approved_by_reviewer:
-                after_status = "PASS"
-                detail = "Reviewer has verified replacement audio."
-            else:
-                after_status = "PENDING"
-                detail = "Requires human listener sign-off."
-
-        else:
-            # Fallback
-            after_status = "PASS" if not original_defect_failed else "FAIL"
-            detail = a.get("description", "Assertion evaluated.")
-
-        assertion_results.append({
-            "id": aid,
-            "type": atype,
-            "description": a.get("description", ""),
-            "before": before_status,
-            "after": after_status,
-            "detail": detail
-        })
-
-    # Check for regression: did a check that is NOT the original defect fail?
-    original_defect_type = capsule_spec.get("defect_type")
-    for ftype in finding_check_types:
-        if ftype != original_defect_type and ftype in ("CLIPPING", "UNEXPECTED_SILENCE", "PACE_OUT_OF_RANGE"):
-            regressed_detected = True
-
-    # Compute verdict
-    if original_defect_failed:
-        verdict = "STILL_FAILING"
-    elif regressed_detected:
-        verdict = "REGRESSED"
-    elif all_auto_passed and approved_by_reviewer:
-        verdict = "RESOLVED"
-    elif all_auto_passed:
-        verdict = "NEEDS_REVIEW"
-    else:
-        verdict = "STILL_FAILING"
-
-    return verdict, assertion_results
+    ev = Evidence(
+        transcript=transcript, asr_status=asr_status, metrics=metrics,
+        reference_text=reference, phrase_matcher=match_single_phrase, normalizer=normalize_text_hindi,
+        last_sentence_eval=evaluate_last_sentence_match(reference, transcript) if transcript.strip() else None,
+        phrase_variants=variants, human_signoff_by=signed_off_by,
+        new_findings=[f.check_type if hasattr(f, "check_type") else f.get("check_type") for f in new_findings],
+    )
+    return run_regression(capsule_spec, ev)

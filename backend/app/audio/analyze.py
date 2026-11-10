@@ -18,6 +18,7 @@ def analyze_audio_file(audio_path: str) -> Dict[str, Any]:
     n_samples = len(samples)
     if n_samples == 0:
         return {
+            "analysis_ok": False,  # nothing measured: zeros below are NOT measurements
             "duration_s": 0.0,
             "sample_rate": sr,
             "peak_db": -100.0,
@@ -119,6 +120,7 @@ def analyze_audio_file(audio_path: str) -> Dict[str, Any]:
     )
 
     return {
+        "analysis_ok": True,
         "duration_s": round(duration_s, 3),
         "sample_rate": sr,
         "peak_db": round(peak_db, 2),

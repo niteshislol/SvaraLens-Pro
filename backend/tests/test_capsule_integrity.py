@@ -7,8 +7,10 @@ from app.main import app
 from app.capsule.compiler import compute_sha256, build_assertions_for_defect
 from app.capsule.regression import evaluate_capsule_assertions
 from app.models import TestCase as DBTestCase
+from app.auth.security import create_access_token
 
 client = TestClient(app)
+client.headers["Authorization"] = f"Bearer {create_access_token({'sub': 'admin', 'role': 'ADMIN', 'org_id': 'org-default'})}"
 
 def test_sha256_byte_digest_accuracy():
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:

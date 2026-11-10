@@ -5,23 +5,64 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from .db import Base
 
+
 def utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class Organisation(Base):
+    __tablename__ = "organisations"
+
+    id = Column(String, primary_key=True)  # e.g. 'org-gnani-qa', 'org-default'
+    name = Column(String, nullable=False)
+    created_at = Column(String, default=utcnow_iso, nullable=False)
+    is_active = Column(Integer, default=1, nullable=False)
+
+    users = relationship("User", back_populates="organisation", cascade="all, delete-orphan")
+    suites = relationship("Suite", back_populates="organisation", cascade="all, delete-orphan")
+    test_cases = relationship("TestCase", back_populates="organisation", cascade="all, delete-orphan")
+    audit_events = relationship("AuditEvent", back_populates="organisation", cascade="all, delete-orphan")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True)  # usr-xxxx
+    org_id = Column(String, ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False, index=True)
+    username = Column(String, unique=True, nullable=False, index=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    hashed_password = Column(String, nullable=False)
+    role = Column(String, nullable=False)  # 'ADMIN', 'QA_LEAD', 'QA_REVIEWER', 'AUDITOR'
+    full_name = Column(String, nullable=True)
+    is_active = Column(Integer, default=1, nullable=False)
+    created_at = Column(String, default=utcnow_iso, nullable=False)
+    last_login_at = Column(String, nullable=True)
+
+    organisation = relationship("Organisation", back_populates="users")
+
+    __table_args__ = (
+        CheckConstraint("role IN ('ADMIN', 'QA_LEAD', 'QA_REVIEWER', 'AUDITOR')", name="check_user_role"),
+    )
+
 
 class Suite(Base):
     __tablename__ = "suites"
 
     id = Column(String, primary_key=True)
+    org_id = Column(String, ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False, default="org-default", index=True)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     created_at = Column(String, default=utcnow_iso, nullable=False)
 
+    organisation = relationship("Organisation", back_populates="suites")
     test_cases = relationship("TestCase", back_populates="suite", cascade="all, delete-orphan")
+
 
 class TestCase(Base):
     __tablename__ = "test_cases"
 
     id = Column(String, primary_key=True)  # TC-001, TC-014, etc.
+    org_id = Column(String, ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False, default="org-default", index=True)
     suite_id = Column(String, ForeignKey("suites.id", ondelete="CASCADE"), nullable=False)
     scenario = Column(String, nullable=False)
     title = Column(String, nullable=True)
@@ -43,6 +84,7 @@ class TestCase(Base):
     created_at = Column(String, default=utcnow_iso, nullable=False)
     updated_at = Column(String, default=utcnow_iso, onupdate=utcnow_iso, nullable=False)
 
+    organisation = relationship("Organisation", back_populates="test_cases")
     suite = relationship("Suite", back_populates="test_cases")
     runs = relationship("Run", back_populates="test_case", cascade="all, delete-orphan")
     capsules = relationship("Capsule", back_populates="test_case", cascade="all, delete-orphan")
@@ -53,10 +95,12 @@ class TestCase(Base):
         CheckConstraint("severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')", name="check_severity"),
     )
 
+
 class Run(Base):
     __tablename__ = "runs"
 
     id = Column(String, primary_key=True)
+    org_id = Column(String, ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False, default="org-default", index=True)
     case_id = Column(String, ForeignKey("test_cases.id", ondelete="CASCADE"), nullable=False)
     source = Column(String, nullable=False)  # 'TIMBRE_LIVE', 'UPLOAD', 'MOCK_FIXTURE'
     status = Column(String, nullable=False)  # 'CREATED', 'AUDIO_READY', 'TRANSCRIBED', 'ANALYSED', 'FAILED'
@@ -88,10 +132,12 @@ class Run(Base):
         Index("idx_runs_case", "case_id"),
     )
 
+
 class Finding(Base):
     __tablename__ = "findings"
 
     id = Column(String, primary_key=True)
+    org_id = Column(String, ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False, default="org-default", index=True)
     run_id = Column(String, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
     check_type = Column(String, nullable=False)
     status = Column(String, nullable=False)  # 'WARN', 'SUSPECTED', 'FAIL'
@@ -112,10 +158,12 @@ class Finding(Base):
         CheckConstraint("review_state IN ('AUTO_DETECTED', 'HUMAN_CONFIRMED', 'FALSE_POSITIVE', 'NEEDS_SECOND_REVIEW')", name="check_finding_review_state"),
     )
 
+
 class Review(Base):
     __tablename__ = "reviews"
 
     id = Column(String, primary_key=True)
+    org_id = Column(String, ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False, default="org-default", index=True)
     run_id = Column(String, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
     reviewer = Column(Text, nullable=False)
     reviewer_role = Column(String, default="PRIMARY", nullable=False)  # 'PRIMARY' or 'SECOND_REVIEWER'
@@ -126,6 +174,7 @@ class Review(Base):
 
     run = relationship("Run", back_populates="reviews")
     annotations = relationship("ReviewAnnotation", back_populates="review", cascade="all, delete-orphan")
+
 
 class ReviewAnnotation(Base):
     __tablename__ = "review_annotations"
@@ -139,10 +188,12 @@ class ReviewAnnotation(Base):
 
     review = relationship("Review", back_populates="annotations")
 
+
 class Capsule(Base):
     __tablename__ = "capsules"
 
     id = Column(String, primary_key=True)  # SL-001
+    org_id = Column(String, ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False, default="org-default", index=True)
     case_id = Column(String, ForeignKey("test_cases.id", ondelete="CASCADE"), nullable=False)
     source_finding_id = Column(String, ForeignKey("findings.id", ondelete="CASCADE"), nullable=False)
     defect_type = Column(String, nullable=False)
@@ -151,7 +202,7 @@ class Capsule(Base):
     failing_audio_sha256 = Column(Text, nullable=False)
     spec_json = Column(Text, nullable=False)  # Full regression spec, immutable
     defect_pins_json = Column(Text, nullable=True)  # Reviewer pinned defect timestamps
-    state = Column(String, default="OPEN", nullable=False)  # 'OPEN', 'RESOLVED', 'REOPENED'
+    state = Column(String, default="OPEN", nullable=False)  # 'OPEN', 'RESOLVED', 'REOPENED', etc.
     created_at = Column(String, default=utcnow_iso, nullable=False)
 
     test_case = relationship("TestCase", back_populates="capsules")
@@ -159,17 +210,19 @@ class Capsule(Base):
     regression_runs = relationship("RegressionRun", back_populates="capsule", cascade="all, delete-orphan")
 
     __table_args__ = (
-        CheckConstraint("state IN ('OPEN', 'RESOLVED', 'REOPENED')", name="check_capsule_state"),
+        CheckConstraint("state IN ('DRAFT', 'EVIDENCE_LOCKED', 'OPEN', 'REGRESSION_IN_PROGRESS', 'NEEDS_REVIEW', 'STILL_FAILING', 'REGRESSED', 'BLOCKED', 'RESOLVED', 'REJECTED', 'REOPENED')", name="check_capsule_state"),
     )
+
 
 class RegressionRun(Base):
     __tablename__ = "regression_runs"
 
     id = Column(String, primary_key=True)
+    org_id = Column(String, ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False, default="org-default", index=True)
     capsule_id = Column(String, ForeignKey("capsules.id", ondelete="CASCADE"), nullable=False)
     run_id = Column(String, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
     assertion_results_json = Column(Text, nullable=False)  # [{id, before, after}]
-    verdict = Column(String, nullable=False)  # 'RESOLVED', 'STILL_FAILING', 'REGRESSED', 'NEEDS_REVIEW'
+    verdict = Column(String, nullable=False)  # 'RESOLVED', 'STILL_FAILING', 'REGRESSED', 'NEEDS_REVIEW', 'BLOCKED'
     approved_by = Column(Text, nullable=True)
     approved_at = Column(String, nullable=True)
     created_at = Column(String, default=utcnow_iso, nullable=False)
@@ -178,8 +231,9 @@ class RegressionRun(Base):
     run = relationship("Run", back_populates="regression_runs")
 
     __table_args__ = (
-        CheckConstraint("verdict IN ('RESOLVED', 'STILL_FAILING', 'REGRESSED', 'NEEDS_REVIEW')", name="check_verdict"),
+        CheckConstraint("verdict IN ('RESOLVED', 'STILL_FAILING', 'REGRESSED', 'NEEDS_REVIEW', 'BLOCKED')", name="check_verdict"),
     )
+
 
 class EvalResult(Base):
     __tablename__ = "eval_results"
@@ -192,13 +246,20 @@ class EvalResult(Base):
     is_clean = Column(Integer, default=0, nullable=False)
     created_at = Column(String, default=utcnow_iso, nullable=False)
 
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
 
     id = Column(String, primary_key=True)
-    entity_type = Column(String, nullable=False)  # 'CASE', 'RUN', 'CAPSULE', 'REGRESSION', 'REVIEW'
-    entity_id = Column(String, nullable=False)
-    action = Column(String, nullable=False)  # 'CREATE', 'UPDATE', 'DELETE', 'COMPILE', 'RERUN', 'APPROVE', 'REOPEN', 'IMPORT'
-    actor = Column(String, default="System", nullable=False)
-    details_json = Column(Text, nullable=True)
-    created_at = Column(String, default=utcnow_iso, nullable=False)
+    org_id = Column(String, ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False, default="org-default", index=True)
+    actor_id = Column(String, nullable=False)
+    actor_username = Column(String, nullable=False)
+    actor_role = Column(String, nullable=False)
+    action = Column(String, nullable=False)  # 'AUTH_LOGIN', 'FINDING_CONFIRMED', 'REVIEW_CREATED', etc.
+    resource_type = Column(String, nullable=False)  # 'Finding', 'Capsule', 'RegressionRun', 'TestCase', 'User', etc.
+    resource_id = Column(String, nullable=False)
+    timestamp = Column(String, default=utcnow_iso, nullable=False, index=True)
+    details_json = Column(Text, default="{}", nullable=False)
+    ip_address = Column(String, nullable=True)
+
+    organisation = relationship("Organisation", back_populates="audit_events")

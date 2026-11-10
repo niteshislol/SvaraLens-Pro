@@ -72,11 +72,13 @@ def run_all_checks(
             "insertions": wer_cer["insertions"],
             "deletions": wer_cer["deletions"],
             "substitutions": wer_cer["substitutions"],
+            "analysis_ok": bool(audio_analysis.get("analysis_ok", False)),
             "duration_s": audio_analysis.get("duration_s", 0.0),
             "sample_rate": audio_analysis.get("sample_rate", 16000),
             "peak_db": audio_analysis.get("peak_db", -100.0),
             "clip_ratio": audio_analysis.get("clip_ratio", 0.0),
             "silence_regions_count": len(audio_analysis.get("silence_regions", [])),
+            "tail_analysis": audio_analysis.get("tail_analysis", {}),
             "pace_wps": round(len(reference_text.split()) / max(audio_analysis.get("duration_s", 1.0), 0.1), 2)
         }
     }

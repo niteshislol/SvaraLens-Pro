@@ -2,8 +2,10 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 from app.gnani.mock import MockGnaniClient
+from app.auth.security import create_access_token
 
 client = TestClient(app)
+client.headers["Authorization"] = f"Bearer {create_access_token({'sub': 'admin', 'role': 'ADMIN', 'org_id': 'org-default'})}"
 
 @pytest.mark.anyio
 async def test_mock_multi_model_synthesize():

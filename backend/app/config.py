@@ -8,12 +8,22 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 class Settings:
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
     PROJECT_NAME: str = "SvaraLens"
     TAGLINE: str = "Indic Voice QA Evidence & Regression Workbench"
     VERSION: str = "0.1.0"
     API_PREFIX: str = "/api"
 
     BASE_DIR: Path = BASE_DIR
+
+    # Environment & Security Configuration
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development").lower()
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "dev_secret_key_change_in_production_998877665544332211")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480"))
+    ALLOW_CREDENTIALS: bool = True
 
     # Gnani API settings [CONFIRM]
     GNANI_API_KEY: str = os.getenv("GNANI_API_KEY", "")
@@ -38,6 +48,25 @@ class Settings:
         ).split(",")
         if origin.strip()
     ]
+
+    def validate_configuration(self):
+        """Validates configuration at startup. Raises ValueError on security violations."""
+        if self.ALLOW_CREDENTIALS:
+            for origin in self.CORS_ORIGINS:
+                if origin == "*" or origin.strip() == "*":
+                    raise ValueError(
+                        "CORS configuration invalid: wildcard origin '*' is prohibited when allow_credentials=True."
+                    )
+            if not self.CORS_ORIGINS and self.ENVIRONMENT in ("production", "staging"):
+                raise ValueError("CORS configuration invalid: explicit origins required in production/staging.")
+
+        if self.ENVIRONMENT in ("production", "staging"):
+            if not self.SECRET_KEY or self.SECRET_KEY.startswith("dev_") or len(self.SECRET_KEY) < 32:
+                raise ValueError(
+                    f"Insecure SECRET_KEY configured for {self.ENVIRONMENT} environment. A 32+ character random secret is required."
+                )
+            if not self.GNANI_API_KEY and not self.MOCK_MODE:
+                raise ValueError("GNANI_API_KEY is required in production when MOCK_MODE=false.")
 
     # Audio limits
     MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "10"))

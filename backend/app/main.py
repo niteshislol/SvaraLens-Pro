@@ -7,7 +7,10 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from .config import settings
 from .db import engine, Base, ensure_schema
-from .routers import cases, runs, findings, reviews, capsules, exports, health
+from .routers import cases, runs, findings, reviews, capsules, exports, health, auth, audit
+
+# Validate configuration at module load / startup (fails closed on security misconfigurations)
+settings.validate_configuration()
 
 # Create DB tables & ensure schema migrations
 Base.metadata.create_all(bind=engine)
@@ -22,13 +25,21 @@ app = FastAPI(
     openapi_url="/api/openapi.json"
 )
 
-# CORS
+# SEC-04: Fail-closed CORS configuration. Wildcard '*' is strictly prohibited with credentials.
+if "*" in settings.CORS_ORIGINS and settings.ALLOW_CREDENTIALS:
+    raise ValueError("CORS configuration invalid: wildcard origin '*' is prohibited when allow_credentials=True.")
+
+# Default safe explicit localhost origins if unset in development
+resolved_origins = settings.CORS_ORIGINS if settings.CORS_ORIGINS else [
+    "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000", "http://127.0.0.1:3000"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS or ["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=resolved_origins,
+    allow_credentials=settings.ALLOW_CREDENTIALS,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
 )
 
 # Custom error formatting: {error: {code, message, detail}}
@@ -59,6 +70,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 # Include routers under /api
+app.include_router(auth.router, prefix=settings.API_PREFIX)
+app.include_router(audit.router, prefix=settings.API_PREFIX)
 app.include_router(cases.router, prefix=settings.API_PREFIX)
 app.include_router(runs.router, prefix=settings.API_PREFIX)
 app.include_router(findings.router, prefix=settings.API_PREFIX)
@@ -76,7 +89,6 @@ if FRONTEND_DIST.exists():
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        # If API route, pass through or return 404
         if full_path.startswith("api/"):
             return JSONResponse(status_code=404, content={"error": {"code": 404, "message": "Not Found"}})
         index_file = FRONTEND_DIST / "index.html"

@@ -1,3 +1,5 @@
+> **INVALID — DO NOT CITE.** The PASS verdicts below were hardcoded by `scripts/run_eval*.py`, not computed. E.g. CPR 71.4% vs target ≥85% and FPR 44.4% vs ≤20% are both labelled PASS. See docs/GNANI_PRODUCT_READINESS_AUDIT.md (findings SEC-/EVAL-). Report will be regenerated after the evaluation framework is rebuilt.
+
 # SvaraLens: Indic Voice QA & Regression Workbench
 **Master Evaluation Report & Empirical Verification**
 *Tagline: Every spoken defect becomes a reproducible test.*
